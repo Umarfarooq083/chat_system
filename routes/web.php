@@ -40,10 +40,14 @@ Route::get('/chat', [ChatController::class, 'visitorChat']);
 
 Route::post('/send-message', [ChatController::class, 'sendMessage']);
 Route::post('/chat/ping', [ChatController::class, 'ping']);
+Route::get('/attachments/{message}/view', [ChatController::class, 'viewAttachment'])->name('attachments.view');
+Route::get('/attachments/{message}/download', [ChatController::class, 'downloadAttachment'])->name('attachments.download');
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats', [AgentController::class, 'index'])->name('agent.chats');
+    Route::get('/agent/chats/poll', [AgentController::class, 'poll'])->name('agent.chats.poll');
     Route::get('/agent/chats/{chat}', [AgentController::class, 'show'])->name('agent.chat.show');
+    Route::get('/agent/chats/{chat}/messages', [AgentController::class, 'messages'])->name('agent.chat.messages');
     Route::post('/agent/chats/{chat}/read', [AgentController::class, 'markRead'])->name('agent.chat.read');
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
 });
@@ -53,3 +57,10 @@ Route::post('/visitor-chat/create', [ChatController::class, 'getOrCreateChat']);
 // Route::post('/send-message', [ChatController::class, 'sendMessage']);
 
 require __DIR__.'/auth.php';
+
+
+// phone no (required)
+// customer name (required)
+// cnic 
+// registration no (required)
+// email

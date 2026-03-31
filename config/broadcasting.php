@@ -1,5 +1,16 @@
 <?php
 
+$pusherVerify = env('PUSHER_VERIFY', true);
+if (is_string($pusherVerify)) {
+    $pusherVerify = filter_var($pusherVerify, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true;
+}
+
+$pusherCaBundle = env('PUSHER_CA_BUNDLE');
+if (is_string($pusherCaBundle) && trim($pusherCaBundle) !== '') {
+    // Guzzle: `verify` can be a bool or a path to a CA bundle file
+    $pusherVerify = $pusherCaBundle;
+}
+
 return [
 
     /*
@@ -61,6 +72,7 @@ return [
             ],
             'client_options' => [
                 // Guzzle client options: https://docs.guzzlephp.org/en/stable/request-options.html
+                'verify' => $pusherVerify,
             ],
         ],
 

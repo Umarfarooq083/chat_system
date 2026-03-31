@@ -20,7 +20,18 @@ class NewChat implements ShouldBroadcastNow
 
     public function __construct(Chat $chat)
     {
-        $this->chat = $chat->load('messages');
+        $this->chat = $chat->load([
+            'latestMessage' => function ($query) {
+                $query->select(
+                    'messages.id',
+                    'messages.chat_id',
+                    'messages.sender_type',
+                    'messages.message',
+                    'messages.message_type',
+                    'messages.created_at'
+                );
+            },
+        ]);
     }
 
     public function broadcastOn()
