@@ -16,7 +16,7 @@ return new class extends Migration
             $table->integer('chat_id')->nullable()->index();
             $table->string('sender_type'); // visitor or agent
             $table->integer('sender_id')->nullable();
-            $table->text('message');
+            $table->text('message')->nullable();
             $table->softDeletes();
             $table->timestamps();
         });

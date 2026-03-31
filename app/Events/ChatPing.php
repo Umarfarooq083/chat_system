@@ -17,12 +17,14 @@ class ChatPing implements ShouldBroadcastNow
     public $chatId;
     public $currentUrl;
     public $ip;
+    public $lastActivity;
 
     public function __construct(Chat $chat)
     {
         $this->chatId = $chat->id;
         $this->currentUrl = $chat->current_url;
         $this->ip = $chat->ip;
+        $this->lastActivity = $chat->last_activity?->toIso8601String();
     }
 
     public function broadcastOn(): Channel

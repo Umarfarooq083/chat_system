@@ -5,6 +5,8 @@ import axios from 'axios'
 const open = ref(true)
 const messages = ref([])
 const message = ref('')
+const attachedFiles = ref([])
+const fileInputRef = ref(null)
 const messageContainer = ref(null)
 const showUserForm = ref(false)
 const userForm = ref({
@@ -15,6 +17,51 @@ const userForm = ref({
 let chatId = null
 let lastSentUrl = null
 let urlTrackingSetup = false
+
+const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
+  if (!relativeOrAbsoluteUrl) return null
+  if (/^https?:\/\//i.test(relativeOrAbsoluteUrl)) return relativeOrAbsoluteUrl
+
+  const cfg = window.ChatConfig || {}
+  const apiBase = (cfg.apiBase || '').toString().trim()
+
+  // For external widgets, `apiBase` is often like `https://your-domain.com/api`.
+  // Attachments live on the web host root, so we only use the URL origin, not the `/api` path.
+  if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      const origin = new URL(apiBase).origin
+      return origin + relativeOrAbsoluteUrl
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // If apiBase is not absolute, we can't reliably resolve cross-domain attachments.
+  return relativeOrAbsoluteUrl
+}
+
+const withToken = (url) => {
+  if (!url) return null
+  const cfg = window.ChatConfig || {}
+  if (!cfg.apiToken) return url
+  // Don't mutate signed URLs (adding params breaks the signature)
+  if (url.includes('signature=')) return url
+
+  try {
+    const u = new URL(url, window.location.origin)
+    // only add if not present already
+    if (!u.searchParams.get('token')) {
+      u.searchParams.set('token', cfg.apiToken)
+    }
+    return u.toString()
+  } catch (e) {
+    const join = url.includes('?') ? '&' : '?'
+    return url + join + 'token=' + encodeURIComponent(cfg.apiToken)
+  }
+}
+
+const attachmentViewUrl = (msg) => withToken(resolveAttachmentUrl(msg?.attachment_view_url))
+const attachmentDownloadUrl = (msg) => withToken(resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
@@ -133,11 +180,47 @@ const pingChat = async (force = false) => {
   }
 }
 
+const triggerFileInput = () => {
+  fileInputRef.value?.click()
+}
+
+const onFileInputChange = (event) => {
+  addFiles(Array.from(event.target.files || []))
+  event.target.value = ''
+}
+
+const addFiles = (newFiles) => {
+  const file = newFiles[0]
+  if (!file) return
+  attachedFiles.value = []
+  const isImage = file.type.startsWith('image/')
+  const preview = isImage ? URL.createObjectURL(file) : null
+  attachedFiles.value.push({ file, preview, isImage })
+}
+
+const removeAttachment = (index) => {
+  const item = attachedFiles.value[index]
+  if (item?.preview) URL.revokeObjectURL(item.preview)
+  attachedFiles.value.splice(index, 1)
+}
+
+const clearAttachments = () => {
+  attachedFiles.value.forEach(item => {
+    if (item.preview) URL.revokeObjectURL(item.preview)
+  })
+  attachedFiles.value = []
+}
+
 const sendMessage = async () => {
-  if (!message.value.trim() || !chatId) return
+  if (!chatId) return
+  const hasText = message.value.trim() !== ''
+  const hasFiles = attachedFiles.value.length > 0
+  if (!hasText && !hasFiles) return
 
   const userMessage = message.value
-  message.value = '' 
+  const tempFiles = [...attachedFiles.value]
+  message.value = ''
+  clearAttachments()
 
   try {
     const cfg = window.ChatConfig || {}
@@ -147,15 +230,28 @@ const sendMessage = async () => {
 
     const sendUrl = apiBase ? apiBase + '/message' : '/send-message'
 
-    await axios.post(sendUrl, {
-      chat_id: chatId,
-      message: userMessage,
-      sender_type: 'visitor'
-    }, { headers })
+    if (hasFiles) {
+      const formData = new FormData()
+      formData.append('chat_id', chatId)
+      formData.append('message', userMessage)
+      formData.append('sender_type', 'visitor')
+      if (tempFiles[0]?.file) {
+        formData.append('attachments', tempFiles[0].file)
+      }
+
+      await axios.post(sendUrl, formData, { headers })
+    } else {
+      await axios.post(sendUrl, {
+        chat_id: chatId,
+        message: userMessage,
+        sender_type: 'visitor'
+      }, { headers })
+    }
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send message:', error)
     message.value = userMessage
+    attachedFiles.value = tempFiles
   }
 }
 
@@ -163,9 +259,9 @@ const submitUserInfo = async () => {
   if (!chatId) return
 
   const userInfoMessage = "User Information:\n" +
-                         "Name: " + userForm.value.name + "\n" +
-                         "Email: " + userForm.value.email + "\n" +
-                         "Details: " + userForm.value.details
+      "Name: " + userForm.value.name + "\n" +
+      "Email: " + userForm.value.email + "\n" +
+      "Details: " + userForm.value.details
 
   try {
     const cfg = window.ChatConfig || {}
@@ -225,7 +321,22 @@ const cancelUserInfo = () => {
             <div class="text-xs opacity-75 mb-1">
               {{ msg.sender_type === 'visitor' ? 'You' : 'Agent' }}
             </div>
-            <div class="text-sm">{{ msg.message }}</div>
+            <div class="text-sm whitespace-pre-line">{{ msg.message }}</div>
+            <div v-if="attachmentViewUrl(msg)" class="mt-2">
+              <img v-if="msg.attachment_is_image" :src="attachmentViewUrl(msg)"
+                :alt="msg.attachment_name || 'Attachment'"
+                class="max-w-[180px] max-h-40 rounded border border-gray-200 object-cover cursor-pointer"
+                @click="window.open(attachmentViewUrl(msg), '_blank')" />
+              <div v-if="msg.attachment_is_image" class="mt-1 text-right">
+                <a :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener">
+                 <i class="fa fa-download" aria-hidden="true"></i>
+                </a>
+              </div>
+              <a v-else :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener"
+                class="text-xs underline break-all">
+                Download {{ msg.attachment_name || 'file' }}
+              </a>
+            </div>
             <div class="text-xs opacity-50 text-right mt-1">
               {{ formatTime(msg.created_at) }}
             </div>
@@ -282,23 +393,43 @@ const cancelUserInfo = () => {
         </form>
       </div>
 
-      <!-- Input form -->
-      <form v-else @submit.prevent="sendMessage" class="flex border-t p-2">
-        <input 
-          v-model="message" 
-          type="text" 
-          placeholder="Type a message..." 
-          class="border rounded-l-full px-4 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-300"
-        />
-        <button 
-          type="submit" 
-          class="bg-blue-500 text-white px-4 py-2 rounded-r-full hover:bg-blue-600 transition-colors"
-          :disabled="!message.trim()"
-          :class="{ 'opacity-50 cursor-not-allowed': !message.trim() }"
-        >
-          Send
-        </button>
-      </form>
+      <!-- Input area -->
+      <div v-else class="border-t p-2">
+        <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
+          <div v-for="(item, index) in attachedFiles" :key="index"
+            class="relative flex items-center gap-2 bg-gray-100 border border-gray-200 rounded px-2 py-1">
+            <img v-if="item.isImage" :src="item.preview" :alt="item.file.name" class="w-10 h-10 object-cover rounded" />
+            <div v-else class="text-xs max-w-[180px] truncate">{{ item.file.name }}</div>
+            <button type="button" @click="removeAttachment(index)"
+              class="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-gray-700 text-white text-xs leading-none">
+              ×
+            </button>
+          </div>
+        </div>
+
+        <form @submit.prevent="sendMessage" class="flex gap-2">
+          <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
+
+          <button type="button" @click="triggerFileInput" title="Attach file"
+            class="w-10 h-10 flex items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+
+          <input v-model="message" type="text" placeholder="Type a message..."
+            class="border rounded-full px-4 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+
+          <button type="submit"
+            class="bg-blue-500 text-white px-4 py-2 rounded-full hover:bg-blue-600 transition-colors"
+            :disabled="!message.trim() && !attachedFiles.length"
+            :class="{ 'opacity-50 cursor-not-allowed': !message.trim() && !attachedFiles.length }">
+            Send
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 </template>

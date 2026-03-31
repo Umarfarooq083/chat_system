@@ -34,6 +34,11 @@ class Chat extends Model
         return $this->hasMany(Message::class);
     }
 
+    public function latestMessage()
+    {
+        return $this->hasOne(Message::class)->latestOfMany();
+    }
+
     // Determine if visitor is currently online (active in last 2 minutes)
     public function getIsOnlineAttribute()
     {
@@ -41,6 +46,7 @@ class Chat extends Model
             return false;
         }
 
-        return $this->last_activity->gt(now()->subMinutes(2));
+        // Consider visitor online if they pinged within the last minute.
+        return $this->last_activity->gt(now()->subSeconds(60));
     }
 }

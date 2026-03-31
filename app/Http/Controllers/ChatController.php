@@ -7,6 +7,7 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Message;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
@@ -27,24 +28,45 @@ class ChatController extends Controller
     public function sendMessage(Request $request)
     {
         $request->validate([
-            'message' => 'required|string',
+            'message' => 'required_without:attachments|nullable|string',
             'sender_type' => 'required|string',
             'chat_id' => 'required|exists:chats,id',
-            'message_type' => 'nullable|string'
+            'message_type' => 'nullable|string',
+            'attachments' => 'nullable|file|max:20480',
         ]);
+
         $chat = Chat::find($request->chat_id);
 
-        // update last activity whenever visitor interacts
         if ($request->sender_type === 'visitor') {
             $chat->last_activity = now();
             broadcast(new \App\Events\ChatPing($chat));
         }
 
+        $message = $request->message;
+        $chat_message = '';
+        $filePath = null;
+        if ($request->hasFile('attachments')) {
+            $uploaded = $request->file('attachments');
+            if (is_array($uploaded)) {
+                $uploaded = $uploaded[0] ?? null;
+            }
+
+            if ($uploaded) {
+                $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
+                $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+
+                $fileName = (string) Str::uuid() . '.' . $ext;
+                $dir = 'chat-attachments/' . $chat->id;
+                $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+            }
+        }
+
         $message = Message::create([
             'chat_id' => $chat->id,
             'sender_type' => $request->sender_type,
-            'message' => $request->message,
+            'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
             'message_type' => $request->message_type,
+            'attachments' => $filePath,
         ]);
 
         // keep chat list ordering consistent
@@ -66,6 +88,65 @@ class ChatController extends Controller
 
         // return response()->json(['success' => true, 'message' => $message]);
         return response()->noContent();
+    }
+
+    private function assertCanAccessAttachment(Request $request, Message $message): void
+    {
+        if ($request->hasValidSignature()) {
+            return;
+        }
+
+        $token = config('chat.api_token');
+        $providedToken = $request->header('X-CHAT-TOKEN') ?: $request->query('token');
+        if ($token && is_string($providedToken) && hash_equals($token, $providedToken)) {
+            return;
+        }
+
+        if (auth()->check()) {
+            return;
+        }
+
+        $visitorId = session('visitor_id');
+        if (!$visitorId) {
+            abort(403);
+        }
+
+        $message->loadMissing('chat');
+        if (!$message->chat || $message->chat->visitor_id !== $visitorId) {
+            abort(403);
+        }
+    }
+
+    public function viewAttachment(Request $request, Message $message)
+    {
+        $this->assertCanAccessAttachment($request, $message);
+
+        if (!$message->attachments) {
+            abort(404);
+        }
+
+        $disk = Storage::disk('public');
+        if (!$disk->exists($message->attachments)) {
+            abort(404);
+        }
+
+        return response()->file($disk->path($message->attachments));
+    }
+
+    public function downloadAttachment(Request $request, Message $message)
+    {
+        $this->assertCanAccessAttachment($request, $message);
+
+        if (!$message->attachments) {
+            abort(404);
+        }
+
+        $disk = Storage::disk('public');
+        if (!$disk->exists($message->attachments)) {
+            abort(404);
+        }
+
+        return $disk->download($message->attachments, basename($message->attachments));
     }
 
     public function getOrCreateChat(Request $request)
