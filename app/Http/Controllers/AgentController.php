@@ -171,4 +171,36 @@ class AgentController extends Controller
         $chat->delete();
         // return response()->json(['message' => 'Chat and all its messages deleted successfully.']);
     }
+
+    public function close(Chat $chat)
+    {
+        if ($chat->assigned_agent_id && $chat->assigned_agent_id !== auth()->id()) {
+            return response()->noContent();
+        }
+
+        if (!$chat->assigned_agent_id) {
+            $chat->assigned_agent_id = auth()->id();
+        }
+
+        $chat->status = 'close';
+        $chat->save();
+
+        $chat->load([
+            'latestMessage' => function ($query) {
+                $query->select(
+                    'messages.id',
+                    'messages.chat_id',
+                    'messages.sender_type',
+                    'messages.message',
+                    'messages.message_type',
+                    'messages.created_at'
+                );
+            },
+        ]);
+        $chat->append('is_online');
+
+        return response()->json([
+            'chat' => $chat,
+        ]);
+    }
 }

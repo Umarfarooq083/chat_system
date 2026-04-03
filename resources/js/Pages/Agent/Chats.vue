@@ -251,6 +251,19 @@ const moveChatToTop = (chatId) => {
   chats.value.unshift(chat)
 }
 
+const closeChat = async (chat, event) => {
+  event.stopPropagation()
+  if (!confirm('Are you sure you want to close this chat?')) return
+  try {
+    await axios.post(`/agent/chats/${chat.id}/close`)
+    const existing = chats.value.find(c => c.id === chat.id)
+    if (existing) existing.status = 'close'
+    if (selectedChat.value && selectedChat.value.id === chat.id) {
+      selectedChat.value.status = 'close'
+    }
+  } catch (e) { }
+}
+
 const markChatRead = async (chatId, force = false) => {
   const chat = chats.value.find(c => c.id === chatId)
   if (!chat) return
@@ -331,19 +344,19 @@ onMounted(() => {
 })
 
 const filteredOpenChats = computed(() => {
-  return props.chats.filter(chat => chat?.assigned_agent_id === props.auth_user.id && chat?.status === 'open');
+  return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
 });
 
 const filteredClosedChats = computed(() => {
-  return props.chats.filter(chat => chat?.assigned_agent_id === props.auth_user.id && chat?.status === 'close');
+  return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'close');
 });
 
 const filteredUnassignChats = computed(() => {
-  return props.chats.filter(chat => chat?.assigned_agent_id == null);
+  return chats.value.filter(chat => chat?.assigned_agent_id == null);
 });
 
 const filteredGlobalChats = computed(() => {
-  return props.chats.filter(chat => chat?.assigned_agent_id != props.auth_user.id && chat?.assigned_agent_id != null);
+  return chats.value.filter(chat => chat?.assigned_agent_id != props.auth_user?.id && chat?.assigned_agent_id != null);
 });
 
 const subscribeToChat = (chatId) => {
@@ -397,11 +410,11 @@ const subscribeToChat = (chatId) => {
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Recent chats</div>
-            <div
+            <!-- <div
               class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
               {{chats.filter(c => c.is_online).length}} online
-            </div>
+            </div> -->
           </div>
         </div>
         
@@ -462,6 +475,14 @@ const subscribeToChat = (chatId) => {
 
             <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1" >
+              <button @click="closeChat(chat, $event)" title="Close Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-600 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <path d="M18 6 6 18" />
+                  <path d="M6 6l12 12" />
+                </svg>
+              </button>
               <button @click="deleteChat(chat, $event)" title="Delete Chat"
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -867,10 +888,10 @@ const subscribeToChat = (chatId) => {
           <div class="flex items-end justify-between">
             <div>Other chats</div>
           </div>
-        </div>
+        </div> 
 
         <!-- Chat items list Other chats -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div v-for="chat in filteredGlobalChats" :key="chat.id" @click="selectChat(chat)" :class="[
               'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
                 selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
@@ -879,7 +900,7 @@ const subscribeToChat = (chatId) => {
                     ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
                     : 'hover:bg-slate-50'
               ]">
-            <!-- Avatar -->
+           
             <div class="relative flex-shrink-0">
               <div :class="[
                 'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
@@ -898,7 +919,6 @@ const subscribeToChat = (chatId) => {
               </span>
             </div>
 
-            <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
@@ -924,7 +944,6 @@ const subscribeToChat = (chatId) => {
               </p>
             </div>
 
-            <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
               <button @click="deleteChat(chat, $event)" title="Delete Chat"
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
@@ -938,7 +957,7 @@ const subscribeToChat = (chatId) => {
               </button>
             </div>
           </div>
-        </div>
+        </div> -
       </aside>
     </div>
 

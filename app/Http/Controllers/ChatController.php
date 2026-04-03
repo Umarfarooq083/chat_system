@@ -7,6 +7,7 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Message;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -327,28 +328,53 @@ class ChatController extends Controller
     }
 
     // Update last activity from visitor ping
+    // public function ping(Request $request)
+    // {
+    //     $request->validate([
+    //         'chat_id' => 'required|exists:chats,id',
+    //         'current_url' => 'nullable|string|max:2048',
+    //     ]);
+    //     $chat = Chat::find($request->chat_id);
+    //     $chat->last_activity = now();
+    //     if (!$chat->ip) {
+    //         $chat->ip = $request->ip();
+    //     }
+    //     $currentUrl = $this->resolveCurrentUrl($request);
+    //     if ($currentUrl) {
+    //         $chat->current_url = $currentUrl;
+    //     }
+    //     $chat->save();
+
+    //     broadcast(new \App\Events\ChatPing($chat));
+
+    //     return response()->json(['status' => 'ok']);
+    // }
+
+
     public function ping(Request $request)
     {
-        $request->validate([
-            'chat_id' => 'required|exists:chats,id',
+        $validated = $request->validate([
+            'chat_id'     => 'required|exists:chats,id',
             'current_url' => 'nullable|string|max:2048',
         ]);
-        $chat = Chat::find($request->chat_id);
-        $chat->last_activity = now();
-        if (!$chat->ip) {
-            $chat->ip = $request->ip();
-        }
-        $currentUrl = $this->resolveCurrentUrl($request);
-        if ($currentUrl) {
-            $chat->current_url = $currentUrl;
-        }
-        $chat->save();
 
-        // broadcast ping so agents can mark online
+        $currentUrl = $this->resolveCurrentUrl($request);
+
+        $updates = [
+            'last_activity' => now(),
+            'ip'            => DB::raw("COALESCE(ip, '{$request->ip()}')"),
+        ];
+
+        if ($currentUrl) {
+            $updates['current_url'] = $currentUrl;
+        }
+       Chat::where('id', $validated['chat_id'])->update($updates);
+       $chat = Chat::find($validated['chat_id']);
         broadcast(new \App\Events\ChatPing($chat));
 
         return response()->json(['status' => 'ok']);
     }
+
 
     public function sendUserInfo(Request $request)
     {

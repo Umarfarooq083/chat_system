@@ -49,6 +49,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats/{chat}', [AgentController::class, 'show'])->name('agent.chat.show');
     Route::get('/agent/chats/{chat}/messages', [AgentController::class, 'messages'])->name('agent.chat.messages');
     Route::post('/agent/chats/{chat}/read', [AgentController::class, 'markRead'])->name('agent.chat.read');
+    Route::post('/agent/chats/{chat}/close', [AgentController::class, 'close'])->name('agent.chat.close');
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
 });
 
