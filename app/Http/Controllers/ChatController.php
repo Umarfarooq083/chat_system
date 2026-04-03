@@ -35,59 +35,71 @@ class ChatController extends Controller
             'attachments' => 'nullable|file|max:20480',
         ]);
 
-        $chat = Chat::find($request->chat_id);
+        try {
+            $chat = Chat::find($request->chat_id);
 
-        if ($request->sender_type === 'visitor') {
-            $chat->last_activity = now();
-            broadcast(new \App\Events\ChatPing($chat));
-        }
-
-        $message = $request->message;
-        $chat_message = '';
-        $filePath = null;
-        if ($request->hasFile('attachments')) {
-            $uploaded = $request->file('attachments');
-            if (is_array($uploaded)) {
-                $uploaded = $uploaded[0] ?? null;
+            if ($request->sender_type === 'visitor') {
+                $chat->last_activity = now();
+                broadcast(new \App\Events\ChatPing($chat));
             }
 
-            if ($uploaded) {
-                $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
-                $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+            $chat_message = '';
+            $filePath = null;
+            if ($request->hasFile('attachments')) {
+                $uploaded = $request->file('attachments');
+                if (is_array($uploaded)) {
+                    $uploaded = $uploaded[0] ?? null;
+                }
 
-                $fileName = (string) Str::uuid() . '.' . $ext;
-                $dir = 'chat-attachments/' . $chat->id;
-                $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+                if ($uploaded) {
+                    $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
+                    $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+
+                    $fileName = (string) Str::uuid() . '.' . $ext;
+                    $dir = 'chat-attachments/' . $chat->id;
+                    $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+                }
             }
-        }
 
-        $message = Message::create([
-            'chat_id' => $chat->id,
-            'sender_type' => $request->sender_type,
-            'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
-            'message_type' => $request->message_type,
-            'attachments' => $filePath,
-        ]);
+            $message = Message::create([
+                'chat_id' => $chat->id,
+                'sender_type' => $request->sender_type,
+                'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
+                'message_type' => $request->message_type,
+                'attachments' => $filePath,
+            ]);
 
-        // keep chat list ordering consistent
-        $chat->last_message_at = $message->created_at;
-        if (!$chat->ip) {
-            $chat->ip = $request->ip();
-        }
-        $currentUrl = $this->resolveCurrentUrl($request);
-        if ($currentUrl) {
-            $chat->current_url = $currentUrl;
-        }
-        // if the agent is sending, assume they have the chat open/read
-        if ($request->sender_type === 'agent') {
-            $chat->agent_last_read_at = now();
-        }
-        $chat->save();
+            // keep chat list ordering consistent
+            $chat->last_message_at = $message->created_at;
+            if (!$chat->ip) {
+                $chat->ip = $request->ip();
+            }
+            $currentUrl = $this->resolveCurrentUrl($request);
+            if ($currentUrl) {
+                $chat->current_url = $currentUrl;
+            }
+            // if the agent is sending, assume they have the chat open/read
+            if ($request->sender_type === 'agent') {
+                $chat->agent_last_read_at = now();
+            }
+            $chat->save();
 
-        broadcast(new MessageSent($message));
+            broadcast(new MessageSent($message));
 
-        // return response()->json(['success' => true, 'message' => $message]);
-        return response()->noContent();
+            return response()->noContent();
+        } catch (\Throwable $e) {
+            report($e);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'Failed to send message. Please try again.',
+                ], 500);
+            }
+
+            return back()->withErrors([
+                'message' => 'Failed to send message. Please try again.',
+            ]);
+        }
     }
 
     private function assertCanAccessAttachment(Request $request, Message $message): void
@@ -160,6 +172,7 @@ class ChatController extends Controller
         $chat = Chat::firstOrCreate(
             ['visitor_id' => $visitorId],
             [
+                'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
             ]
@@ -176,7 +189,7 @@ class ChatController extends Controller
             $chat->save();
         }
 
-       $messages = $chat->messages()->latest()->take(5)->get();
+        $messages = $chat->messages()->latest()->take(5)->get()->reverse()->values();
         broadcast(new NewChat($chat));
         return response()->json([
             'chat' => $chat,
@@ -248,40 +261,69 @@ class ChatController extends Controller
     public function externalSendMessage(Request $request)
     {
         $request->validate([
-            'chat_id' => 'required|exists:chats,id',
-            'message' => 'required|string',
+            'message' => 'required_without:attachments|nullable|string',
             'sender_type' => 'required|string',
+            'chat_id' => 'required|exists:chats,id',
             'message_type' => 'nullable|string',
             'current_url' => 'nullable|string|max:2048',
+            'attachments' => 'nullable|file|max:20480',
         ]);
-    
-        $chat = Chat::find($request->chat_id);
-        if ($request->sender_type === 'visitor') {
-            $chat->last_activity = now();
-            broadcast(new \App\Events\ChatPing($chat));
-        }
-        $message = Message::create([
-            'chat_id'     => $chat->id,
-            'sender_type' => $request->sender_type,
-            'message'     => $request->message,
-            'message_type' => $request->message_type,
-        ]);
-    
-        $chat->last_message_at = $message->created_at;
-        if (!$chat->ip) {
-            $chat->ip = $request->ip();
-        }
-        $currentUrl = $this->resolveCurrentUrl($request);
-        if ($currentUrl) {
-            $chat->current_url = $currentUrl;
-        }
-        if ($request->sender_type === 'agent') {
-            $chat->agent_last_read_at = now();
-        }
-        $chat->save();
 
-        broadcast(new MessageSent($message));
-        return response()->noContent();
+        try {
+            $chat = Chat::find($request->chat_id);
+            if ($request->sender_type === 'visitor') {
+                $chat->last_activity = now();
+                broadcast(new \App\Events\ChatPing($chat));
+            }
+
+            $chat_message = '';
+            $filePath = null;
+            if ($request->hasFile('attachments')) {
+                $uploaded = $request->file('attachments');
+                if (is_array($uploaded)) {
+                    $uploaded = $uploaded[0] ?? null;
+                }
+
+                if ($uploaded) {
+                    $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
+                    $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+
+                    $fileName = (string) Str::uuid() . '.' . $ext;
+                    $dir = 'chat-attachments/' . $chat->id;
+                    $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+                }
+            }
+
+            $message = Message::create([
+                'chat_id' => $chat->id,
+                'sender_type' => $request->sender_type,
+                'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
+                'message_type' => $request->message_type,
+                'attachments' => $filePath,
+            ]);
+
+            $chat->last_message_at = $message->created_at;
+            if (!$chat->ip) {
+                $chat->ip = $request->ip();
+            }
+            $currentUrl = $this->resolveCurrentUrl($request);
+            if ($currentUrl) {
+                $chat->current_url = $currentUrl;
+            }
+            if ($request->sender_type === 'agent') {
+                $chat->agent_last_read_at = now();
+            }
+            $chat->save();
+
+            broadcast(new MessageSent($message));
+            return response()->noContent();
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Failed to send message. Please try again.',
+            ], 500);
+        }
     }
 
     // Update last activity from visitor ping

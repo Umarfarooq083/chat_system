@@ -39,6 +39,11 @@ class Chat extends Model
         return $this->hasOne(Message::class)->latestOfMany();
     }
 
+    public function agent()
+    {
+        return $this->hasOne(User::class, 'id', 'assigned_agent_id');
+    }
+
     // Determine if visitor is currently online (active in last 2 minutes)
     public function getIsOnlineAttribute()
     {

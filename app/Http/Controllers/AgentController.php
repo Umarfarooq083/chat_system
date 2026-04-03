@@ -12,6 +12,7 @@ class AgentController extends Controller
     public function index()
     {
         $chats = Chat::query()
+            ->with('agent')
             ->with([
                 'latestMessage' => function ($query) {
                     $query->select(
@@ -42,6 +43,7 @@ class AgentController extends Controller
         $chats->each->append('is_online');
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
+            'auth_user' => auth()->user(),
             // used by the agent UI to poll for updates without needing a full reload
             'pollCursor' => now()->toIso8601String(),
         ]);
@@ -148,9 +150,18 @@ class AgentController extends Controller
 
     public function markRead(Chat $chat)
     {
-        $chat->agent_last_read_at = now();
-        $chat->save();
-
+        if($chat->assigned_agent_id){
+            if($chat->assigned_agent_id !== auth()->id()){
+                  return response()->noContent();
+            }else{
+                $chat->agent_last_read_at = now();
+                $chat->save();
+            }
+        }else{
+            $chat->assigned_agent_id = auth()->id();
+            $chat->agent_last_read_at = now();
+            $chat->save();
+        }
         return response()->noContent();
     }
 

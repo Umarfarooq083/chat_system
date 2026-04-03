@@ -1,11 +1,16 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch,computed } from 'vue'
 import axios from 'axios'
+import { extractErrorMessage } from '../../utils/extractErrorMessage'
 
 // Props from backend
 const props = defineProps({
   chats: {
+    type: Array,
+    default: () => []
+  },
+  auth_user: {
     type: Array,
     default: () => []
   },
@@ -19,11 +24,13 @@ const chats = ref([])
 const selectedChat = ref(null)
 const messages = ref([])
 const replyMessage = ref('')
+const sendError = ref('')
 const markingRead = ref(new Set())
 const subscribedChatIds = new Set()
 const pollCursor = ref(props.pollCursor)
 let onlineFlagsIntervalId = null
 let pollIntervalId = null
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 // File attachment state
 const attachedFiles = ref([])
@@ -119,6 +126,10 @@ const addFiles = (newFiles) => {
   // only take the first file — one at a time
   const file = newFiles[0]
   if (!file) return
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    sendError.value = 'File too large. Maximum size is 20 MB.'
+    return
+  }
   attachedFiles.value = [] // replace any existing
   const isImage = file.type.startsWith('image/')
   const preview = isImage ? URL.createObjectURL(file) : null
@@ -190,8 +201,10 @@ const sendReply = async () => {
         sender_type: 'agent'
       })
     }
+    sendError.value = ''
   } catch (e) {
     // restore on error
+    sendError.value = extractErrorMessage(e, 'Failed to send. Please try again.')
     replyMessage.value = tempMessage
     attachedFiles.value = tempFiles
   }
@@ -216,8 +229,10 @@ const deleteChat = async (chat, event) => {
 
 // Show user info form
 const showUserInfoForm = async (chat, event) => {
-  event.stopPropagation()
-  selectChat(chat)
+  if (event?.stopPropagation) event.stopPropagation()
+  if (selectedChat.value?.id !== chat?.id) {
+    await selectChat(chat)
+  }
   const formData = {
     chat_id: chat.id,
     message: 'Please provide your contact information by filling out the form below.',
@@ -315,6 +330,22 @@ onMounted(() => {
   // pollIntervalId = setInterval(pollForChats, 5000)
 })
 
+const filteredOpenChats = computed(() => {
+  return props.chats.filter(chat => chat?.assigned_agent_id === props.auth_user.id && chat?.status === 'open');
+});
+
+const filteredClosedChats = computed(() => {
+  return props.chats.filter(chat => chat?.assigned_agent_id === props.auth_user.id && chat?.status === 'close');
+});
+
+const filteredUnassignChats = computed(() => {
+  return props.chats.filter(chat => chat?.assigned_agent_id == null);
+});
+
+const filteredGlobalChats = computed(() => {
+  return props.chats.filter(chat => chat?.assigned_agent_id != props.auth_user.id && chat?.assigned_agent_id != null);
+});
+
 const subscribeToChat = (chatId) => {
   if (subscribedChatIds.has(chatId)) return
   if (!window.Echo) return
@@ -338,7 +369,7 @@ const subscribeToChat = (chatId) => {
 
 <template>
   <AuthenticatedLayout>
-    <template #header>
+    <!-- <template #header>
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600 text-white">
@@ -354,20 +385,18 @@ const subscribeToChat = (chatId) => {
           Live
         </div>
       </div>
-    </template>
+    </template> -->
 
     <!-- WORKSPACE -->
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
-      style="height: calc(100vh - 130px);">
-
+      style="height: calc(100vh - 85px);">
       <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-r border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
-
         <!-- Sidebar top stats -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
-            <div></div>
+            <div>Recent chats</div>
             <div
               class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
@@ -375,22 +404,22 @@ const subscribeToChat = (chatId) => {
             </div>
           </div>
         </div>
-
-        <!-- Chat items list -->
+        
+        <!-- Chat items list recent chats -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in chats" :key="chat.id" @click="selectChat(chat)" :class="[
-            'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-            selectedChat?.id === chat.id
-              ? 'bg-indigo-50 ring-1 ring-indigo-200'
-              : chat.unread_count > 0
-                ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                : 'hover:bg-slate-50'
-          ]">
+          <div v-for="chat in filteredOpenChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]"> 
             <!-- Avatar -->
-            <div class="relative flex-shrink-0">
+            <div class="relative flex-shrink-0" >
               <div :class="[
                 'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
-                selectedChat?.id === chat.id
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
                   ? 'bg-indigo-600 text-white'
                   : 'bg-slate-100 text-slate-500'
               ]">
@@ -400,14 +429,90 @@ const subscribeToChat = (chatId) => {
                 'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
                 chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
               ]"></span>
-              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id"
+              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
                 class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
               </span>
             </div>
 
+            <!-- Text Info -->
+            <div class="flex-1 min-w-0 pr-12" >
+              <div class="flex items-center gap-2 mb-0.5">
+                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat #{{ chat.id }} 
+                </span>
+                <span v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;">
+                  {{ chat.unread_count }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 truncate mb-1">
+                {{ chat?.latest_message?.message || 'No messages yet' }}
+              </p>
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1" >
+              <button @click="deleteChat(chat, $event)" title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Previous chats</div>
+          </div>
+        </div>
+        
+        <!-- Chat items list previous chats -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div v-for="chat in filteredClosedChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]"> 
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+              <div :class="[
+                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
+              ]">
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
+              </span>
+            </div>
 
             <!-- Text Info -->
-            <div class="flex-1 min-w-0 pr-12">
+            <div class="flex-1 min-w-0 pr-12" >
               <div class="flex items-center gap-2 mb-0.5">
                 <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
                   Chat #{{ chat.id }}
@@ -434,12 +539,6 @@ const subscribeToChat = (chatId) => {
 
             <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
-              <button @click="showUserInfoForm(chat, $event)" title="Send Info Form"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 12 3 3l18 9-18 9 3-9Z" />
-                </svg>
-              </button>
               <button @click="deleteChat(chat, $event)" title="Delete Chat"
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -453,6 +552,7 @@ const subscribeToChat = (chatId) => {
             </div>
           </div>
         </div>
+
 
       </aside>
 
@@ -478,15 +578,25 @@ const subscribeToChat = (chatId) => {
                 </span>
               </div>
             </div>
-            <div :class="[
-              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
-              selectedChat.is_online
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-slate-100 text-slate-400 border-slate-200'
-            ]">
-              <span
-                :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
-              {{ selectedChat.is_online ? 'Online' : 'Offline' }}
+
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button @click="showUserInfoForm(selectedChat)" title="Send Info Form"
+                class="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 12 3 3l18 9-18 9 3-9Z" />
+                </svg>
+              </button>
+
+              <div :class="[
+                'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
+                selectedChat.is_online
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-slate-100 text-slate-400 border-slate-200'
+              ]">
+                <span
+                  :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
+                {{ selectedChat.is_online ? 'Online' : 'Offline' }}
+              </div>
             </div>
           </div>
 
@@ -604,8 +714,16 @@ const subscribeToChat = (chatId) => {
               Drop files to attach
             </div>
 
+            <div v-if="sendError" class="px-4 pb-2">
+              <div
+                class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start justify-between gap-2">
+                <span class="whitespace-pre-line">{{ sendError }}</span>
+                <button type="button" class="font-bold leading-none" @click="sendError = ''">×</button>
+              </div>
+            </div>
+
             <!-- Input row -->
-            <form @submit.prevent="sendReply" class="flex items-center gap-0 px-4 py-3">
+            <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="flex items-center gap-0 px-4 py-3">
 
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
@@ -658,6 +776,170 @@ const subscribeToChat = (chatId) => {
         </div>
 
       </main>
+
+      <!-- RIGHT SIDEBAR -->
+      <aside class="flex flex-col bg-white border-l border-slate-200 overflow-hidden"
+        style="width: 350px; min-width: 350px;">
+        <!-- Sidebar top stats -->
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Unassign chats</div>
+            <div
+              class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              {{chats.filter(c => c.is_online).length}} online
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat items list Unassign chats -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div v-for="chat in filteredUnassignChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id 
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]">
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+              <div :class="[
+                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
+                selectedChat?.id === chat.id 
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
+              ]">
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span v-if="chat.unread_count > 0"
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
+              </span>
+            </div>
+
+            <!-- Text Info -->
+            <div class="flex-1 min-w-0 pr-12">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat #{{ chat.id }} 
+                </span>
+                <span v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;">
+                  {{ chat.unread_count }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 truncate mb-1">
+                {{ chat?.latest_message?.message || 'No messages yet' }}
+              </p>
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1">
+              <button @click="deleteChat(chat, $event)" title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Other chats</div>
+          </div>
+        </div>
+
+        <!-- Chat items list Other chats -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div v-for="chat in filteredGlobalChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]">
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+              <div :class="[
+                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
+              ]">
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
+              </span>
+            </div>
+
+            <!-- Text Info -->
+            <div class="flex-1 min-w-0 pr-12">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat #{{ chat.id }}
+                </span>
+                <span v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;">
+                  {{ chat.unread_count }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 truncate mb-1">
+                {{ chat?.latest_message?.message || 'No messages yet' }}
+              </p>
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1">
+              <button @click="deleteChat(chat, $event)" title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
     </div>
 
   </AuthenticatedLayout>

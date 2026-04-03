@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, watch, nextTick } from 'vue'
 import axios from 'axios'
+import { extractErrorMessage } from '../utils/extractErrorMessage'
 
 const open = ref(true)
 const messages = ref([])
@@ -9,6 +10,7 @@ const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const messageContainer = ref(null)
 const showUserForm = ref(false)
+const sendError = ref('')
 const userForm = ref({
   name: '',
   email: '',
@@ -17,6 +19,7 @@ const userForm = ref({
 let chatId = null
 let lastSentUrl = null
 let urlTrackingSetup = false
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
   if (!relativeOrAbsoluteUrl) return null
@@ -192,6 +195,10 @@ const onFileInputChange = (event) => {
 const addFiles = (newFiles) => {
   const file = newFiles[0]
   if (!file) return
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    sendError.value = 'File too large. Maximum size is 20 MB.'
+    return
+  }
   attachedFiles.value = []
   const isImage = file.type.startsWith('image/')
   const preview = isImage ? URL.createObjectURL(file) : null
@@ -247,9 +254,11 @@ const sendMessage = async () => {
         sender_type: 'visitor'
       }, { headers })
     }
+    sendError.value = ''
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send message:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
     message.value = userMessage
     attachedFiles.value = tempFiles
   }
@@ -278,11 +287,13 @@ const submitUserInfo = async () => {
       message_type: 'user_info_response'
     }, { headers })
     
+    sendError.value = ''
     showUserForm.value = false
     userForm.value = { name: '', email: '', details: '' }
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send user info:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
   }
 }
 
@@ -294,7 +305,7 @@ const cancelUserInfo = () => {
 
 
 <template>
-  <div class="fixed bottom-5 right-5 w-80 z-50">
+  <div class="fixed bottom-5 right-5 w-100 z-50">
     <div class="bg-blue-500 text-white p-2 rounded-t-lg cursor-pointer" @click="open = !open">
       Chat with us
     </div>
@@ -342,6 +353,13 @@ const cancelUserInfo = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Send error -->
+      <div v-if="sendError"
+        class="border-t border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start justify-between gap-2">
+        <span class="whitespace-pre-line">{{ sendError }}</span>
+        <button type="button" class="text-red-700 font-bold leading-none" @click="sendError = ''">×</button>
       </div>
 
       <!-- User Info Form -->
@@ -412,7 +430,7 @@ const cancelUserInfo = () => {
 
           <button type="button" @click="triggerFileInput" title="Attach file"
             class="w-10 h-10 flex items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            <svg width="35" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
               <path
                 d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
