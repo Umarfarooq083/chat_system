@@ -14,6 +14,70 @@ use Inertia\Inertia;
 
 class ChatController extends Controller
 {
+    private function extractUserInfoFieldFromMessage(string $message, string $label): ?string
+    {
+        $pattern = '/^' . preg_quote($label, '/') . '\\s*:\\s*(.+)\\s*$/mi';
+        if (preg_match($pattern, $message, $matches) !== 1) {
+            return null;
+        }
+
+        $value = trim((string) ($matches[1] ?? ''));
+        return $value !== '' ? $value : null;
+    }
+
+    private function applyVisitorUserInfoToChat(Request $request, Chat $chat): void
+    {
+        if ($request->input('message_type') !== 'user_info_response' || $request->input('sender_type') !== 'visitor') {
+            return;
+        }
+
+        $message = (string) ($request->input('message') ?? '');
+
+        $existingRegistrationNo = is_string($chat->registration_no) ? trim($chat->registration_no) : null;
+
+        $phone = $request->input('phone') ?: $this->extractUserInfoFieldFromMessage($message, 'Phone No');
+        $customerName = $request->input('customer_name') ?: $this->extractUserInfoFieldFromMessage($message, 'Customer Name');
+        $registrationNo = $request->input('registration_no') ?: $this->extractUserInfoFieldFromMessage($message, 'Registration No');
+        $email = $request->input('email') ?: $this->extractUserInfoFieldFromMessage($message, 'Email');
+
+        $phone = is_string($phone) ? trim($phone) : null;
+        $customerName = is_string($customerName) ? trim($customerName) : null;
+        $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+        $email = is_string($email) ? trim($email) : null;
+        if ($email === '') $email = null;
+
+        if (!$phone || !$customerName || !$registrationNo) {
+            return;
+        }
+
+        if (strlen($phone) > 50 || strlen($customerName) > 255 || strlen($registrationNo) > 100) {
+            return;
+        }
+
+        if ($email) {
+            if (strlen($email) > 255 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                $email = null;
+            }
+        }
+
+        $chat->phone = $phone;
+        $chat->customer_name = $customerName;
+        $chat->registration_no = $registrationNo;
+        $chat->email = $email;
+        $chat->user_info_submitted_at = now();
+
+        // When the visitor submits a different registration number, any previously fetched
+        // third-party data/PDF should be considered stale (so hide "Send PDF" until re-fetch).
+        $incomingRegistrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+        if (($existingRegistrationNo ?? '') !== ($incomingRegistrationNo ?? '')) {
+            $chat->external_api_status = null;
+            $chat->external_api_error = null;
+            $chat->external_api_response = null;
+            $chat->external_api_fetched_at = null;
+            $chat->external_api_pdf_sent_at = null;
+        }
+    }
+
     private function resolveCurrentUrl(Request $request): ?string
     {
         $url = $request->input('current_url') ?: $request->header('referer');
@@ -34,6 +98,10 @@ class ChatController extends Controller
             'chat_id' => 'required|exists:chats,id',
             'message_type' => 'nullable|string',
             'attachments' => 'nullable|file|max:20480',
+            'phone' => 'nullable|string|max:50',
+            'customer_name' => 'nullable|string|max:255',
+            'registration_no' => 'nullable|string|max:100',
+            'email' => 'nullable|string|max:255',
         ]);
 
         try {
@@ -43,6 +111,8 @@ class ChatController extends Controller
                 $chat->last_activity = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
+
+            $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = '';
             $filePath = null;
@@ -191,7 +261,11 @@ class ChatController extends Controller
         }
 
         $messages = $chat->messages()->latest()->take(5)->get()->reverse()->values();
-        broadcast(new NewChat($chat));
+        try {
+            broadcast(new NewChat($chat));
+        } catch (\Throwable $e) {
+            report($e);
+        }
         return response()->json([
             'chat' => $chat,
             'messages' => $messages
@@ -253,8 +327,12 @@ class ChatController extends Controller
             $chat->save();
         }
         $messages = $chat->messages()->latest()->take(5)->get();
-    
-        broadcast(new NewChat($chat));
+
+        try {
+            broadcast(new NewChat($chat));
+        } catch (\Throwable $e) {
+            report($e);
+        }
     
         return response()->json(['chat' => $chat, 'messages' => $messages]);
     }
@@ -268,6 +346,10 @@ class ChatController extends Controller
             'message_type' => 'nullable|string',
             'current_url' => 'nullable|string|max:2048',
             'attachments' => 'nullable|file|max:20480',
+            'phone' => 'nullable|string|max:50',
+            'customer_name' => 'nullable|string|max:255',
+            'registration_no' => 'nullable|string|max:100',
+            'email' => 'nullable|string|max:255',
         ]);
 
         try {
@@ -276,6 +358,8 @@ class ChatController extends Controller
                 $chat->last_activity = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
+
+            $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = '';
             $filePath = null;

@@ -5,10 +5,36 @@ namespace App\Http\Controllers;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use App\Models\Chat;
+use App\Models\ChatExternalApiFetch;
+use App\Models\Message;
+use App\Events\MessageSent;
+use App\Services\RegistrationApiClient;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 use Inertia\Inertia;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class AgentController extends Controller
 {
+    private function extractFieldFromMessage(?string $message, string $label): ?string
+    {
+        if (!$message) return null;
+        $pattern = '/^' . preg_quote($label, '/') . '\\s*:\\s*(.+)\\s*$/mi';
+        if (preg_match($pattern, $message, $matches) !== 1) {
+            return null;
+        }
+        $value = trim((string) ($matches[1] ?? ''));
+        return $value !== '' ? $value : null;
+    }
+
+    private function assertCanActOnChat(Chat $chat): void
+    {
+        if ($chat->assigned_agent_id && $chat->assigned_agent_id !== auth()->id()) {
+            abort(403);
+        }
+    }
+
     public function index()
     {
         $chats = Chat::query()
@@ -202,5 +228,220 @@ class AgentController extends Controller
         return response()->json([
             'chat' => $chat,
         ]);
+    }
+
+    public function fetchExternalData(Request $request, Chat $chat, RegistrationApiClient $client)
+    {
+        $this->assertCanActOnChat($chat);
+
+        $chat->loadMissing('messages');
+
+        $requestRegistrationNo = $request->input('registration_no');
+        $registrationNo = is_string($requestRegistrationNo) ? trim($requestRegistrationNo) : null;
+
+        if (!$registrationNo) {
+            $registrationNo = $chat->registration_no;
+        }
+
+        if (!$registrationNo) {
+            $last = $chat->messages()
+                ->where('message_type', 'user_info_response')
+                ->orderByDesc('created_at')
+                ->first();
+            $registrationNo = $this->extractFieldFromMessage($last?->message, 'Registration No');
+        }
+
+        if (!$registrationNo) {
+            return response()->json([
+                'message' => 'Registration No is missing for this chat.',
+            ], 422);
+        }
+
+        $registrationNo = trim((string) $registrationNo);
+
+        try {
+            $response = $client->lookup((string) $registrationNo, (int) $chat->id);
+            $data = null;
+            try {
+                $data = $response->json();
+            } catch (\Throwable $e) {
+                $data = null;
+            }
+            if ($data === null) {
+                $data = [
+                    'raw' => $response->body(),
+                ];
+            }
+            if (!is_array($data)) {
+                $data = [
+                    'value' => $data,
+                ];
+            }
+            // keep chat registration in sync with the one we used for lookup
+            if (!$chat->registration_no || trim((string) $chat->registration_no) !== $registrationNo) {
+                $chat->registration_no = $registrationNo;
+            }
+            // persist on the chat record (DB)
+            $chat->external_api_fetched_at = now();
+            if ($response->successful()) {
+                $isEmptyPayload = is_array($data) && count($data) === 0;
+                $hasOnlyMessage = is_array($data) && array_key_exists('message', $data) && count(array_diff_key($data, ['message' => true])) === 0;
+
+                if ($isEmptyPayload || $hasOnlyMessage) {
+                    $chat->external_api_status = 'error';
+                    $chat->external_api_error = trim((string) ($data['message'] ?? 'No third-party data found.'));
+                    $chat->external_api_response = $data;
+                } else {
+                    $chat->external_api_status = 'success';
+                    $chat->external_api_error = null;
+                    $chat->external_api_response = $data;
+                }
+            } else {
+                $chat->external_api_status = 'error';
+                $chat->external_api_error = trim((string) ($data['message'] ?? $response->body())) ?: ('HTTP ' . $response->status());
+                $chat->external_api_response = $data;
+            }
+            $chat->save();
+
+            ChatExternalApiFetch::create([
+                'chat_id' => $chat->id,
+                'registration_no' => $registrationNo,
+                'status' => $chat->external_api_status,
+                'error' => $chat->external_api_error,
+                'response' => $chat->external_api_response,
+                'fetched_at' => $chat->external_api_fetched_at,
+            ]);
+
+            return response()->json([
+                'chat' => $chat,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            $chat->external_api_status = 'error';
+            $chat->external_api_error = 'Failed to fetch data from third-party API.';
+            $chat->external_api_fetched_at = now();
+            $chat->save();
+
+            ChatExternalApiFetch::create([
+                'chat_id' => $chat->id,
+                'registration_no' => $registrationNo,
+                'status' => 'error',
+                'error' => $chat->external_api_error,
+                'response' => null,
+                'fetched_at' => $chat->external_api_fetched_at,
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to fetch data from third-party API.',
+                'chat' => $chat,
+            ], 500);
+        }
+    }
+
+    public function sendExternalPdf(Request $request, Chat $chat)
+    {
+        $this->assertCanActOnChat($chat);
+
+        $requestRegistrationNo = $request->input('registration_no');
+        $registrationNo = is_string($requestRegistrationNo) ? trim($requestRegistrationNo) : null;
+
+        if (!$registrationNo) {
+            $registrationNo = $chat->registration_no;
+        }
+        if (!$registrationNo) {
+            $chat->loadMissing('messages');
+            $last = $chat->messages()
+                ->where('message_type', 'user_info_response')
+                ->orderByDesc('created_at')
+                ->first();
+            $registrationNo = $this->extractFieldFromMessage($last?->message, 'Registration No');
+        }
+        $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+        if (!$registrationNo) {
+            return response()->json([
+                'message' => 'Registration No is missing for this chat.',
+            ], 422);
+        }
+
+        $fetch = ChatExternalApiFetch::query()
+            ->where('chat_id', $chat->id)
+            ->where('registration_no', $registrationNo)
+            ->where('status', 'success')
+            ->orderByDesc('id')
+            ->first();
+
+        $data = $fetch?->response;
+        if (!$fetch || !is_array($data) || count($data) === 0) {
+            return response()->json([
+                'message' => 'No third-party data found for this registration. Please fetch data first.',
+            ], 422);
+        }
+
+        try {
+            $html = view('pdf.external-data', [
+                'chat' => $chat,
+                'data' => $data,
+                'registrationNo' => $registrationNo,
+                'generatedAt' => now()->toDateTimeString(),
+            ])->render();
+
+            $options = new Options();
+            $options->set('defaultFont', 'DejaVu Sans');
+            $options->set('isRemoteEnabled', false);
+
+            $dompdf = new Dompdf($options);
+            $dompdf->loadHtml($html, 'UTF-8');
+            $dompdf->setPaper('A4', 'portrait');
+            $dompdf->render();
+
+            $pdfBytes = $dompdf->output();
+
+            $reg = (string) $registrationNo;
+            $safeReg = preg_replace('/[^a-zA-Z0-9-_]+/', '-', $reg);
+            $safeReg = trim((string) $safeReg, '-');
+            if ($safeReg === '') {
+                $safeReg = 'registration';
+            }
+
+            $fileName = 'external-data-' . $safeReg . '-' . (string) Str::uuid() . '.pdf';
+            $dir = 'chat-attachments/' . $chat->id;
+            $path = $dir . '/' . $fileName;
+            Storage::disk('public')->put($path, $pdfBytes);
+
+            $message = Message::create([
+                'chat_id' => $chat->id,
+                'sender_type' => 'agent',
+                'sender_id' => auth()->id(),
+                'message' => null,
+                'message_type' => 'external_data_pdf',
+                'attachments' => $path,
+            ]);
+
+            $fetch->pdf_path = $path;
+            $fetch->pdf_sent_at = now();
+            $fetch->save();
+
+            $chat->external_api_pdf_sent_at = now();
+            $chat->last_message_at = $message->created_at;
+            $chat->agent_last_read_at = now();
+            if (!$chat->assigned_agent_id) {
+                $chat->assigned_agent_id = auth()->id();
+            }
+            $chat->save();
+
+            broadcast(new MessageSent($message));
+
+            return response()->json([
+                'chat' => $chat,
+                'message' => $message,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Failed to generate/send PDF.',
+            ], 500);
+        }
     }
 }

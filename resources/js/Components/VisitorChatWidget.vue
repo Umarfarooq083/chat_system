@@ -12,9 +12,10 @@ const messageContainer = ref(null)
 const showUserForm = ref(false)
 const sendError = ref('')
 const userForm = ref({
-  name: '',
-  email: '',
-  details: ''
+  phone: '',
+  customerName: '',
+  registrationNo: '',
+  email: ''
 })
 let chatId = null
 let lastSentUrl = null
@@ -267,10 +268,24 @@ const sendMessage = async () => {
 const submitUserInfo = async () => {
   if (!chatId) return
 
-  const userInfoMessage = "User Information:\n" +
-      "Name: " + userForm.value.name + "\n" +
-      "Email: " + userForm.value.email + "\n" +
-      "Details: " + userForm.value.details
+  const phone = (userForm.value.phone || '').trim()
+  const customerName = (userForm.value.customerName || '').trim()
+  const registrationNo = (userForm.value.registrationNo || '').trim()
+  const email = (userForm.value.email || '').trim()
+
+  if (!phone || !customerName || !registrationNo) {
+    sendError.value = 'Please fill in the required fields (Phone No, Customer Name, Registration No).'
+    return
+  }
+
+  const lines = [
+    'User Information:',
+    'Phone No: ' + phone,
+    'Customer Name: ' + customerName,
+    'Registration No: ' + registrationNo,
+  ]
+  if (email) lines.push('Email: ' + email)
+  const userInfoMessage = lines.join('\n')
 
   try {
     const cfg = window.ChatConfig || {}
@@ -284,12 +299,16 @@ const submitUserInfo = async () => {
       chat_id: chatId,
       message: userInfoMessage,
       sender_type: 'visitor',
-      message_type: 'user_info_response'
+      message_type: 'user_info_response',
+      phone,
+      customer_name: customerName,
+      registration_no: registrationNo,
+      email: email || null
     }, { headers })
-    
+     
     sendError.value = ''
     showUserForm.value = false
-    userForm.value = { name: '', email: '', details: '' }
+    userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send user info:', error)
@@ -299,7 +318,7 @@ const submitUserInfo = async () => {
 
 const cancelUserInfo = () => {
   showUserForm.value = false
-  userForm.value = { name: '', email: '', details: '' }
+  userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
 }
 </script>
 
@@ -368,10 +387,28 @@ const cancelUserInfo = () => {
         <form @submit.prevent="submitUserInfo" class="space-y-3">
           <div>
             <input
-              v-model="userForm.name"
+              v-model="userForm.phone"
+              type="tel"
+              required
+              placeholder="Phone No"
+              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div>
+            <input
+              v-model="userForm.customerName"
               type="text"
               required
-              placeholder="Your Name"
+              placeholder="Customer Name"
+              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div>
+            <input
+              v-model="userForm.registrationNo"
+              type="text"
+              required
+              placeholder="Registration No"
               class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
             />
           </div>
@@ -379,19 +416,9 @@ const cancelUserInfo = () => {
             <input
               v-model="userForm.email"
               type="email"
-              required
-              placeholder="Your Email"
+              placeholder="Email"
               class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
             />
-          </div>
-          <div>
-            <textarea
-              v-model="userForm.details"
-              required
-              rows="3"
-              placeholder="Additional Details"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-            ></textarea>
           </div>
           <div class="flex gap-2">
             <button

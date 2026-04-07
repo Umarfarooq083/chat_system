@@ -25,6 +25,8 @@ const selectedChat = ref(null)
 const messages = ref([])
 const replyMessage = ref('')
 const sendError = ref('')
+const externalFetching = ref(false)
+const externalPdfSending = ref(false)
 const markingRead = ref(new Set())
 const subscribedChatIds = new Set()
 const pollCursor = ref(props.pollCursor)
@@ -110,6 +112,89 @@ const selectChat = async (chat) => {
   } catch (e) {
     messages.value = []
   }
+}
+
+const mergeChatIntoList = (updated) => {
+  if (!updated?.id) return
+  const idx = chats.value.findIndex(c => c.id === updated.id)
+  if (idx !== -1) Object.assign(chats.value[idx], updated)
+  if (selectedChat.value?.id === updated.id) Object.assign(selectedChat.value, updated)
+}
+
+const fetchExternalData = async (chat) => {
+  if (!chat?.id) return
+  externalFetching.value = true
+  try {
+    const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`)
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')
+  } finally {
+    externalFetching.value = false
+  }
+}
+
+const sendExternalPdf = async (chat, registrationNo = null) => {
+  if (!chat?.id) return
+  externalPdfSending.value = true
+  try {
+    const payload = {}
+    const reg = (registrationNo || '').toString().trim()
+    if (reg) payload.registration_no = reg
+
+    const response = await axios.post(`/agent/chats/${chat.id}/external/send-pdf`, payload)
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+    if (response.data?.message) addMessage(chat.id, response.data.message)
+    moveChatToTop(chat.id)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to generate/send PDF. Please try again.')
+  } finally {
+    externalPdfSending.value = false
+  }
+}
+
+const registrationNoForUserInfoMessage = (msg) => {
+  if (!msg || msg.message_type !== 'user_info_response') return null
+  const text = (msg.message || '').toString()
+  if (!text.trim()) return null
+
+  // Be tolerant: older/edited messages may not match the exact "Registration No:" format.
+  const match =
+    text.match(/(?:^|\r?\n)\s*registration\s*(?:no|number)\s*[:\-]?\s*([^\r\n]+)\s*(?:\r?\n|$)/i) ||
+    text.match(/(?:^|\r?\n)\s*reg(?:istration)?\s*(?:no|number)?\s*[:\-]?\s*([^\r\n]+)\s*(?:\r?\n|$)/i)
+
+  const v = (match?.[1] || '').toString().trim()
+  return v ? v : null
+}
+
+const fetchExternalDataForMessage = async (chat, msg) => {
+  if (!chat?.id) return
+  const registrationNo = registrationNoForUserInfoMessage(msg)
+  if (!registrationNo) {
+    sendError.value = 'Registration No is missing in the user info message.'
+    return
+  }
+
+  externalFetching.value = true
+  try {
+    const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`, { registration_no: registrationNo })
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')
+  } finally {
+    externalFetching.value = false
+  }
+}
+
+const sendExternalPdfForMessage = async (chat, msg) => {
+  const registrationNo = registrationNoForUserInfoMessage(msg)
+  return sendExternalPdf(chat, registrationNo)
+}
+
+const canSendPdfForMessage = (chat, msg) => {
+  const msgReg = (registrationNoForUserInfoMessage(msg) || '').toString().trim()
+  const chatReg = (chat?.registration_no || '').toString().trim()
+  return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
 }
 
 const triggerFileInput = () => {
@@ -235,7 +320,7 @@ const showUserInfoForm = async (chat, event) => {
   }
   const formData = {
     chat_id: chat.id,
-    message: 'Please provide your contact information by filling out the form below.',
+    message: 'Please provide your information: Phone No (required), Customer Name (required), Registration No (required). Email is optional.',
     sender_type: 'agent',
     message_type: 'user_info_request'
   }
@@ -279,10 +364,36 @@ const markChatRead = async (chatId, force = false) => {
   }
 }
 
+const resetExternalApiState = (chatId) => {
+  const chat = chats.value.find(c => c.id === chatId)
+  if (!chat) return
+
+  chat.external_api_status = null
+  chat.external_api_error = null
+  chat.external_api_response = null
+  chat.external_api_fetched_at = null
+  chat.external_api_pdf_sent_at = null
+
+  if (selectedChat.value?.id === chatId) {
+    selectedChat.value.external_api_status = null
+    selectedChat.value.external_api_error = null
+    selectedChat.value.external_api_response = null
+    selectedChat.value.external_api_fetched_at = null
+    selectedChat.value.external_api_pdf_sent_at = null
+  }
+}
+
 const addMessage = (chatId, message) => {
   const chat = chats.value.find(c => c.id === chatId)
   if (!chat) return
   if (chat.latest_message?.id === message.id) return
+
+  // If visitor submits the info form again (possibly for a different registration),
+  // treat any previously fetched external data as stale until re-fetched.
+  if (message?.message_type === 'user_info_response' && message?.sender_type === 'visitor') {
+    resetExternalApiState(chatId)
+  }
+
   if (message.sender_type === 'visitor') chat.is_online = true
   chat.last_message_at = message.created_at
   chat.latest_message = message
@@ -483,7 +594,7 @@ const subscribeToChat = (chatId) => {
                   <path d="M6 6l12 12" />
                 </svg>
               </button>
-              <button @click="deleteChat(chat, $event)" title="Delete Chat"
+              <!-- <button @click="deleteChat(chat, $event)" title="Delete Chat"
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                   stroke-linecap="round">
@@ -492,7 +603,7 @@ const subscribeToChat = (chatId) => {
                   <path d="M10 11v6M14 11v6" />
                   <path d="M9 6V4h6v2" />
                 </svg>
-              </button>
+              </button> -->
             </div>
           </div>
         </div>
@@ -642,10 +753,26 @@ const subscribeToChat = (chatId) => {
                   User Information Received:
                 </div>
                 <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line">{{ msg.message }}</div>
-                <a href="/dashboard"
-                  class="inline-flex items-center gap-2 mt-3 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md">
-                  Fetch Data
-                </a>
+                
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                  <button type="button" @click="fetchExternalDataForMessage(selectedChat, msg)"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="externalFetching">
+                    {{ externalFetching ? 'Fetching...' : 'Fetch Data' }}
+                  </button>
+                 
+                  <button v-if="canSendPdfForMessage(selectedChat, msg)"
+                    type="button" @click="sendExternalPdfForMessage(selectedChat, msg)"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="externalPdfSending">
+                    {{ externalPdfSending ? 'Sending...' : 'Send PDF' }}
+                  </button>
+                </div>
+
+                <div v-if="selectedChat?.external_api_status === 'error' && selectedChat?.external_api_error"
+                  class="mt-2 text-xs text-red-700 whitespace-pre-line">
+                  {{ selectedChat.external_api_error }}
+                </div>
               </div>
 
               <!-- Message with attachments -->

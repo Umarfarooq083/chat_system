@@ -15,6 +15,16 @@ class Chat extends Model
         'ip',
         'website',
         'website_slug',
+        'phone',
+        'customer_name',
+        'registration_no',
+        'email',
+        'user_info_submitted_at',
+        'external_api_status',
+        'external_api_error',
+        'external_api_response',
+        'external_api_fetched_at',
+        'external_api_pdf_sent_at',
         'current_url',
         'country',
         'status',
@@ -27,11 +37,20 @@ class Chat extends Model
         'last_activity' => 'datetime',
         'last_message_at' => 'datetime',
         'agent_last_read_at' => 'datetime',
+        'user_info_submitted_at' => 'datetime',
+        'external_api_fetched_at' => 'datetime',
+        'external_api_pdf_sent_at' => 'datetime',
+        'external_api_response' => 'array',
     ];
 
     public function messages()
     {
         return $this->hasMany(Message::class);
+    }
+
+    public function externalApiFetches()
+    {
+        return $this->hasMany(ChatExternalApiFetch::class);
     }
 
     public function latestMessage()
