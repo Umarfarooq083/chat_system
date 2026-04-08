@@ -3,7 +3,8 @@ import { ref, onMounted, watch, nextTick } from 'vue'
 import axios from 'axios'
 import { extractErrorMessage } from '../utils/extractErrorMessage'
 
-const open = ref(true)
+
+const open = ref(false)
 const messages = ref([])
 const message = ref('')
 const attachedFiles = ref([])
@@ -324,12 +325,16 @@ const cancelUserInfo = () => {
 
 
 <template>
-  <div class="fixed bottom-5 right-5 w-100 z-50">
-    <div class="bg-blue-500 text-white p-2 rounded-t-lg cursor-pointer" @click="open = !open">
-      Chat with us
+  <div v-show="!open" class="chat_btn fixed bottom-5 right-5 bg-primary d-inline-flex align-items-center justify-content-center text-white rounded-full" @click="open = true">
+    <i class="fa fa-commenting fa-3x"></i>
+  </div>
+  <div v-show="open" class="fixed bottom-5 right-5 z-50 cstm_chat">
+    <div class="bg-primary text-white p-2 rounded-t-lg cursor-pointer d-inline-flex justify-content-between align-items-center px-3 w-100" @click="open = false">
+      <div>Chat with us</div>
+      <i class="fa fa-minus"></i>
     </div>
 
-    <div v-show="open" class="bg-white shadow-lg rounded-b-lg h-96 flex flex-col overflow-hidden border-t">
+    <div class="bg-white shadow-lg rounded-b-lg h-96 flex flex-col overflow-hidden border-t position-relative">
       <div ref="messageContainer" class="flex-1 overflow-y-auto p-3 space-y-3">
         <div 
           v-for="(msg, index) in messages" 
@@ -344,7 +349,7 @@ const cancelUserInfo = () => {
             :class="[
               'max-w-[80%] rounded-lg px-3 py-2 break-words',
               msg.sender_type === 'visitor' 
-                ? 'bg-blue-500 text-white rounded-br-none' 
+                ? 'bg-primary text-white rounded-br-none' 
                 : 'bg-gray-100 text-gray-800 rounded-bl-none'
             ]"
           >
@@ -382,64 +387,66 @@ const cancelUserInfo = () => {
       </div>
 
       <!-- User Info Form -->
-      <div v-if="showUserForm" class="border-t p-3 bg-blue-50">
+      <div v-if="showUserForm" class="border-t p-3 bg-blue-50 info_form">
         <h4 class="font-semibold text-blue-800 mb-3">Please provide your information:</h4>
-        <form @submit.prevent="submitUserInfo" class="space-y-3">
-          <div>
+        <form @submit.prevent="submitUserInfo" class="row gx-1">
+          <div class="col-6 mb-1">
             <input
               v-model="userForm.phone"
               type="tel"
               required
               placeholder="Phone No"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              class="form-control form-control-sm"
             />
           </div>
-          <div>
+          <div class="col-6 mb-1">
             <input
               v-model="userForm.customerName"
               type="text"
               required
               placeholder="Customer Name"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              class="form-control form-control-sm"
             />
           </div>
-          <div>
+          <div class="col-6 mb-1">
             <input
               v-model="userForm.registrationNo"
               type="text"
               required
               placeholder="Registration No"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              class="form-control form-control-sm"
             />
           </div>
-          <div>
+          <div class="col-6 mb-1">
             <input
               v-model="userForm.email"
               type="email"
               placeholder="Email"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              class="form-control form-control-sm"
             />
           </div>
-          <div class="flex gap-2">
-            <button
-              type="submit"
-              class="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors"
-            >
-              Submit
-            </button>
-            <button
-              type="button"
-              @click="cancelUserInfo"
-              class="bg-gray-500 text-white px-4 py-2 rounded text-sm hover:bg-gray-600 transition-colors"
-            >
-              Cancel
-            </button>
+            <div class="col-md-12 mt-2">
+            <div class="row gap-2 m-0 justify-content-end">
+              <button
+                type="submit"
+                class="btn btn-primary btn-sm w-25"
+              >
+                Submit
+              </button>
+              <button
+                type="button"
+                @click="cancelUserInfo"
+                class="btn btn-secondary btn-sm w-25"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </form>
       </div>
 
       <!-- Input area -->
-      <div v-else class="border-t p-2">
+      <div  class="border-t p-2">
         <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(item, index) in attachedFiles" :key="index"
             class="relative flex items-center gap-2 bg-gray-100 border border-gray-200 rounded px-2 py-1">
@@ -456,19 +463,15 @@ const cancelUserInfo = () => {
           <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
           <button type="button" @click="triggerFileInput" title="Attach file"
-            class="w-10 h-10 flex items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100">
-            <svg width="35" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <path
-                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
+            class="w-20 rounded-5 border-1">
+            <i class="fa fa-paperclip"></i>
           </button>
 
           <input v-model="message" type="text" placeholder="Type a message..."
-            class="border rounded-full px-4 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+            class="form-control rounded-5" />
 
           <button type="submit"
-            class="bg-blue-500 text-white px-4 py-2 rounded-full hover:bg-blue-600 transition-colors"
+            class="btn btn-primary btn-sm rounded-5 px-3"
             :disabled="!message.trim() && !attachedFiles.length"
             :class="{ 'opacity-50 cursor-not-allowed': !message.trim() && !attachedFiles.length }">
             Send
@@ -480,6 +483,10 @@ const cancelUserInfo = () => {
 </template>
 
 <style scoped>
+.chat_btn {
+    width: 90px;
+    height: 90px;
+}
 .flex-1 {
   scroll-behavior: smooth;
 }
@@ -499,5 +506,8 @@ const cancelUserInfo = () => {
 
 .flex-1::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+.cstm_chat{
+  width: 350px;
 }
 </style>

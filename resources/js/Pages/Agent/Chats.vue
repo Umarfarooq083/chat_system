@@ -3,6 +3,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 import { ref, onMounted, onBeforeUnmount, watch,computed } from 'vue'
 import axios from 'axios'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
+import { beep, setupAudioUnlock } from '../../utils/beep'
 
 // Props from backend
 const props = defineProps({
@@ -55,6 +56,7 @@ onMounted(() => {
   chats.value = props.chats || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
+  setupAudioUnlock()
 })
 
 onBeforeUnmount(() => {
@@ -102,7 +104,7 @@ const selectChat = async (chat) => {
   messages.value = []
   chat.unread_count = 0
   markChatRead(chat.id, true)
-
+  
   try {
     const response = await axios.get(`/agent/chats/${chat.id}/messages`, {
       params: { limit: 10 }
@@ -398,6 +400,10 @@ const addMessage = (chatId, message) => {
   chat.last_message_at = message.created_at
   chat.latest_message = message
   if (message.sender_type === 'visitor') {
+    // Beep for assigned agent when visitor sends a message
+    if (chat?.assigned_agent_id === props.auth_user?.id) {
+      beep()
+    }
     if (selectedChat.value && selectedChat.value.id === chatId) {
       chat.unread_count = 0
       markChatRead(chatId, true)

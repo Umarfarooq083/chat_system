@@ -25,6 +25,7 @@
 import { ref, onMounted } from 'vue';
 import { usePage, router } from '@inertiajs/vue3';
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
+import { beep, setupAudioUnlock } from '../../utils/beep'
 
 const props = usePage().props.value;
 const chat = props.chat;
@@ -52,9 +53,13 @@ const sendReply = () => {
 
 // Listen real-time from visitor
 onMounted(() => {
+  setupAudioUnlock()
   window.Echo.channel('chat.' + chatId)
     .listen('MessageSent', (e) => {
       messages.value.push(e.message);
+      if (e?.message?.sender_type === 'visitor') {
+        beep()
+      }
     });
 });
 </script>
