@@ -9,6 +9,141 @@ define('LARAVEL_START', microtime(true));
 // Register the Composer autoloader...
 require __DIR__.'/vendor/autoload.php';
 
+// Windows / no-pcntl compatibility: some packages (Symfony Console, Octane) may
+// reference POSIX signal constants even when the `pcntl` extension is missing.
+// Defining them avoids fatal errors while leaving signal handling disabled.
+foreach ([
+    'SIGHUP' => 1,
+    'SIGINT' => 2,
+    'SIGQUIT' => 3,
+    'SIGUSR1' => 10,
+    'SIGUSR2' => 12,
+    'SIGALRM' => 14,
+    'SIGTERM' => 15,
+] as $name => $value) {
+    if (! defined($name)) {
+        define($name, $value);
+    }
+}
+
+// Minimal `pcntl_*` polyfills for platforms where the extension is unavailable
+// (e.g. Windows). Symfony Console treats commands implementing
+// `SignalableCommandInterface` as requiring a signal registry; these no-ops let
+// the command run without actual OS-level signal handling.
+if (! function_exists('pcntl_async_signals')) {
+    function pcntl_async_signals($enable = null) { return true; }
+}
+
+if (! function_exists('pcntl_signal')) {
+    function pcntl_signal($signal, $handler, $restart_syscalls = true)
+    {
+        $GLOBALS['__pcntl_handlers'] ??= [];
+        $GLOBALS['__pcntl_handlers'][(int) $signal] = $handler;
+        return true;
+    }
+}
+
+if (! function_exists('pcntl_signal_get_handler')) {
+    function pcntl_signal_get_handler($signal)
+    {
+        $GLOBALS['__pcntl_handlers'] ??= [];
+        return $GLOBALS['__pcntl_handlers'][(int) $signal] ?? (defined('SIG_DFL') ? SIG_DFL : 0);
+    }
+}
+
+if (! function_exists('pcntl_alarm')) {
+    function pcntl_alarm($seconds) { return 0; }
+}
+
+// Minimal `posix_*` polyfills for Windows. Octane's RoadRunner process inspector
+// uses `posix_kill($pid, 0)` to check liveness and `posix_kill($pid, SIGTERM)`
+// to stop the server.
+if (! function_exists('posix_getpid')) {
+    function posix_getpid()
+    {
+        return getmypid();
+    }
+}
+
+if (! function_exists('posix_kill')) {
+    function posix_kill($processId, $signal)
+    {
+        $processId = (int) $processId;
+        $signal = (int) $signal;
+
+        if ($processId <= 0) {
+            return false;
+        }
+
+        if (\PHP_OS_FAMILY !== 'Windows') {
+            return false;
+        }
+
+        $processExists = static function (int $pid): bool {
+            if (class_exists('COM')) {
+                try {
+                    $wmi = new COM('winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2');
+                    $processes = $wmi->ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId = {$pid}");
+                    foreach ($processes as $process) {
+                        return true;
+                    }
+                } catch (\Throwable) {
+                    // Fall back to tasklist below.
+                }
+            }
+
+            if (\function_exists('exec')) {
+                $output = [];
+                $code = 1;
+                @exec('cmd /c tasklist /FI "PID eq '.$pid.'" /NH 2>nul', $output, $code);
+
+                if ($code === 0) {
+                    $text = implode("\n", $output);
+                    return (bool) preg_match('/\b'.preg_quote((string) $pid, '/').'\b/', $text);
+                }
+            }
+
+            return false;
+        };
+
+        $terminateProcess = static function (int $pid): bool {
+            if (class_exists('COM')) {
+                try {
+                    $wmi = new COM('winmgmts:{impersonationLevel=impersonate}!\\\\.\\root\\cimv2');
+                    $processes = $wmi->ExecQuery("SELECT * FROM Win32_Process WHERE ProcessId = {$pid}");
+                    foreach ($processes as $process) {
+                        // 0 indicates success for Win32_Process::Terminate.
+                        return (int) $process->Terminate() === 0;
+                    }
+                } catch (\Throwable) {
+                    // Fall back to taskkill below.
+                }
+            }
+
+            if (\function_exists('exec')) {
+                $output = [];
+                $code = 1;
+                @exec('cmd /c taskkill /PID '.$pid.' /T /F 2>nul', $output, $code);
+                return $code === 0;
+            }
+
+            return false;
+        };
+
+        // Signal 0 means "check if process exists" in POSIX land.
+        if ($signal === 0) {
+            return $processExists($processId);
+        }
+
+        // Best-effort mapping of common termination signals to a Windows kill.
+        if (\in_array($signal, [SIGTERM, SIGINT, SIGQUIT], true)) {
+            return $terminateProcess($processId);
+        }
+
+        return false;
+    }
+}
+
 // Bootstrap Laravel and handle the command...
 /** @var Application $app */
 $app = require_once __DIR__.'/bootstrap/app.php';

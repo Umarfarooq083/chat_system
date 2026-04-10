@@ -48,7 +48,13 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats/poll', [AgentController::class, 'poll'])->name('agent.chats.poll');
     Route::get('/agent/chats/{chat}', [AgentController::class, 'show'])->name('agent.chat.show');
     Route::get('/agent/chats/{chat}/messages', [AgentController::class, 'messages'])->name('agent.chat.messages');
+    Route::get('/agent/chats/{chat}/feedbacks', [AgentController::class, 'feedbacks'])->name('agent.chat.feedbacks');
+    Route::post('/agent/chats/{chat}/feedbacks', [AgentController::class, 'storeFeedback'])->name('agent.chat.feedbacks.store');
     Route::post('/agent/chats/{chat}/read', [AgentController::class, 'markRead'])->name('agent.chat.read');
+    Route::post('/agent/chats/{chat}/close', [AgentController::class, 'close'])->name('agent.chat.close');
+    Route::post('/agent/chats/{chat}/external/fetch', [AgentController::class, 'fetchExternalData'])->name('agent.chat.external.fetch');
+    Route::post('/agent/chats/{chat}/external/send-html', [AgentController::class, 'sendExternalHtml'])->name('agent.chat.external.sendHtml');
+    Route::post('/agent/chats/{chat}/external/send-pdf', [AgentController::class, 'sendExternalPdf'])->name('agent.chat.external.sendPdf');
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
 });
 
@@ -61,6 +67,5 @@ require __DIR__.'/auth.php';
 
 // phone no (required)
 // customer name (required)
-// cnic 
 // registration no (required)
 // email

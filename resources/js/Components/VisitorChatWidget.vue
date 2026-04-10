@@ -1,22 +1,27 @@
 <script setup>
 import { ref, onMounted, watch, nextTick } from 'vue'
 import axios from 'axios'
+import { extractErrorMessage } from '../utils/extractErrorMessage'
 
-const open = ref(true)
+
+const open = ref(false)
 const messages = ref([])
 const message = ref('')
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const messageContainer = ref(null)
 const showUserForm = ref(false)
+const sendError = ref('')
 const userForm = ref({
-  name: '',
-  email: '',
-  details: ''
+  phone: '',
+  customerName: '',
+  registrationNo: '',
+  email: ''
 })
 let chatId = null
 let lastSentUrl = null
 let urlTrackingSetup = false
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
   if (!relativeOrAbsoluteUrl) return null
@@ -61,7 +66,7 @@ const withToken = (url) => {
 }
 
 const attachmentViewUrl = (msg) => withToken(resolveAttachmentUrl(msg?.attachment_view_url))
-const attachmentDownloadUrl = (msg) => withToken(resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
+const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
@@ -192,6 +197,10 @@ const onFileInputChange = (event) => {
 const addFiles = (newFiles) => {
   const file = newFiles[0]
   if (!file) return
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    sendError.value = 'File too large. Maximum size is 20 MB.'
+    return
+  }
   attachedFiles.value = []
   const isImage = file.type.startsWith('image/')
   const preview = isImage ? URL.createObjectURL(file) : null
@@ -247,9 +256,11 @@ const sendMessage = async () => {
         sender_type: 'visitor'
       }, { headers })
     }
+    sendError.value = ''
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send message:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
     message.value = userMessage
     attachedFiles.value = tempFiles
   }
@@ -258,10 +269,24 @@ const sendMessage = async () => {
 const submitUserInfo = async () => {
   if (!chatId) return
 
-  const userInfoMessage = "User Information:\n" +
-      "Name: " + userForm.value.name + "\n" +
-      "Email: " + userForm.value.email + "\n" +
-      "Details: " + userForm.value.details
+  const phone = (userForm.value.phone || '').trim()
+  const customerName = (userForm.value.customerName || '').trim()
+  const registrationNo = (userForm.value.registrationNo || '').trim()
+  const email = (userForm.value.email || '').trim()
+
+  if (!phone || !customerName || !registrationNo) {
+    sendError.value = 'Please fill in the required fields (Phone No, Customer Name, Registration No).'
+    return
+  }
+
+  const lines = [
+    'User Information:',
+    'Phone No: ' + phone,
+    'Customer Name: ' + customerName,
+    'Registration No: ' + registrationNo,
+  ]
+  if (email) lines.push('Email: ' + email)
+  const userInfoMessage = lines.join('\n')
 
   try {
     const cfg = window.ChatConfig || {}
@@ -275,31 +300,51 @@ const submitUserInfo = async () => {
       chat_id: chatId,
       message: userInfoMessage,
       sender_type: 'visitor',
-      message_type: 'user_info_response'
+      message_type: 'user_info_response',
+      phone,
+      customer_name: customerName,
+      registration_no: registrationNo,
+      email: email || null
     }, { headers })
-    
+     
+    sendError.value = ''
     showUserForm.value = false
-    userForm.value = { name: '', email: '', details: '' }
+    userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send user info:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
+  }
+}
+
+const getUserInfo = (msg) => {
+  try {
+    return typeof msg.message === 'string'
+      ? JSON.parse(msg.message)
+      : msg.message
+  } catch (e) {
+    return {}
   }
 }
 
 const cancelUserInfo = () => {
   showUserForm.value = false
-  userForm.value = { name: '', email: '', details: '' }
+  userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
 }
 </script>
 
 
 <template>
-  <div class="fixed bottom-5 right-5 w-80 z-50">
-    <div class="bg-blue-500 text-white p-2 rounded-t-lg cursor-pointer" @click="open = !open">
-      Chat with us
+  <div v-show="!open" class="chat_btn fixed bottom-5 right-5 bg-primary d-inline-flex align-items-center justify-content-center text-white rounded-full" @click="open = true">
+    <i class="fa fa-commenting fa-3x"></i>
+  </div>
+  <div v-show="open" class="fixed bottom-5 right-5 z-50 cstm_chat">
+    <div class="bg-primary text-white p-2 rounded-t-lg cursor-pointer d-inline-flex justify-content-between align-items-center px-3 w-100" @click="open = false">
+      <div>Chat with us</div>
+      <i class="fa fa-minus"></i>
     </div>
 
-    <div v-show="open" class="bg-white shadow-lg rounded-b-lg h-96 flex flex-col overflow-hidden border-t">
+    <div class="bg-white shadow-lg rounded-b-lg h-96 flex flex-col overflow-hidden border-t position-relative">
       <div ref="messageContainer" class="flex-1 overflow-y-auto p-3 space-y-3">
         <div 
           v-for="(msg, index) in messages" 
@@ -314,14 +359,43 @@ const cancelUserInfo = () => {
             :class="[
               'max-w-[80%] rounded-lg px-3 py-2 break-words',
               msg.sender_type === 'visitor' 
-                ? 'bg-blue-500 text-white rounded-br-none' 
+                ? 'bg-primary text-white rounded-br-none' 
                 : 'bg-gray-100 text-gray-800 rounded-bl-none'
             ]"
           >
             <div class="text-xs opacity-75 mb-1">
               {{ msg.sender_type === 'visitor' ? 'You' : 'Agent' }}
             </div>
-            <div class="text-sm whitespace-pre-line">{{ msg.message }}</div>
+           
+            <div class="text-sm whitespace-pre-line" v-if="msg?.message_type === 'user_info_response'">
+              <div class="text-sm whitespace-pre-line">
+                <strong class="text-xs font-bold whitespace-pre-line mb-1.5 flex items-center gap-1.5" style="font-size: 15px;">
+                  User Information Send:
+                </strong>
+                      <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                      <div><strong>Email:</strong> {{ getUserInfo(msg).email }}</div>
+                      <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                      <div><strong>Reg No:</strong> {{ getUserInfo(msg).registration_no }}</div>
+                    </div>
+
+            </div>
+
+            <!-- <div class="text-sm whitespace-pre-line" v-else-if="msg?.message_type === 'external_data_html'">
+              <iframe v-if="attachmentViewUrl(msg)"
+                :src="attachmentViewUrl(msg)"
+                sandbox
+                class="w-full rounded border border-gray-200 bg-white"
+                style="height: 280px;"
+              />
+              <iframe v-else
+                :srcdoc="msg.message"
+                sandbox
+                class="w-full rounded border border-gray-200 bg-white"
+                style="height: 280px;"
+              />
+            </div> -->
+
+            <div class="text-sm whitespace-pre-line" v-else>{{ msg.message }}</div>
             <div v-if="attachmentViewUrl(msg)" class="mt-2">
               <img v-if="msg.attachment_is_image" :src="attachmentViewUrl(msg)"
                 :alt="msg.attachment_name || 'Attachment'"
@@ -344,57 +418,74 @@ const cancelUserInfo = () => {
         </div>
       </div>
 
+      <!-- Send error -->
+      <div v-if="sendError"
+        class="border-t border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start justify-between gap-2">
+        <span class="whitespace-pre-line">{{ sendError }}</span>
+        <button type="button" class="text-red-700 font-bold leading-none" @click="sendError = ''">×</button>
+      </div>
+
       <!-- User Info Form -->
-      <div v-if="showUserForm" class="border-t p-3 bg-blue-50">
+      <div v-if="showUserForm" class="border-t p-3 bg-blue-50 info_form">
         <h4 class="font-semibold text-blue-800 mb-3">Please provide your information:</h4>
-        <form @submit.prevent="submitUserInfo" class="space-y-3">
-          <div>
+        <form @submit.prevent="submitUserInfo" class="row gx-1">
+          <div class="col-6 mb-1">
             <input
-              v-model="userForm.name"
-              type="text"
+              v-model="userForm.phone"
+              type="tel"
               required
-              placeholder="Your Name"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="Phone No"
+              class="form-control form-control-sm"
             />
           </div>
-          <div>
+          <div class="col-6 mb-1">
+            <input
+              v-model="userForm.customerName"
+              type="text"
+              required
+              placeholder="Customer Name"
+              class="form-control form-control-sm"
+            />
+          </div>
+          <div class="col-6 mb-1">
+            <input
+              v-model="userForm.registrationNo"
+              type="text"
+              required
+              placeholder="Registration No"
+              class="form-control form-control-sm"
+            />
+          </div>
+          <div class="col-6 mb-1">
             <input
               v-model="userForm.email"
               type="email"
-              required
-              placeholder="Your Email"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="Email"
+              class="form-control form-control-sm"
             />
           </div>
-          <div>
-            <textarea
-              v-model="userForm.details"
-              required
-              rows="3"
-              placeholder="Additional Details"
-              class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-            ></textarea>
-          </div>
-          <div class="flex gap-2">
-            <button
-              type="submit"
-              class="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors"
-            >
-              Submit
-            </button>
-            <button
-              type="button"
-              @click="cancelUserInfo"
-              class="bg-gray-500 text-white px-4 py-2 rounded text-sm hover:bg-gray-600 transition-colors"
-            >
-              Cancel
-            </button>
+            <div class="col-md-12 mt-2">
+            <div class="row gap-2 m-0 justify-content-end">
+              <button
+                type="submit"
+                class="btn btn-primary btn-sm w-25"
+              >
+                Submit
+              </button>
+              <button
+                type="button"
+                @click="cancelUserInfo"
+                class="btn btn-secondary btn-sm w-25"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </form>
       </div>
 
       <!-- Input area -->
-      <div v-else class="border-t p-2">
+      <div  class="border-t p-2">
         <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(item, index) in attachedFiles" :key="index"
             class="relative flex items-center gap-2 bg-gray-100 border border-gray-200 rounded px-2 py-1">
@@ -411,19 +502,15 @@ const cancelUserInfo = () => {
           <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
           <button type="button" @click="triggerFileInput" title="Attach file"
-            class="w-10 h-10 flex items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <path
-                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
+            class="w-20 rounded-5 border-1">
+            <i class="fa fa-paperclip"></i>
           </button>
 
           <input v-model="message" type="text" placeholder="Type a message..."
-            class="border rounded-full px-4 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+            class="form-control rounded-5" />
 
           <button type="submit"
-            class="bg-blue-500 text-white px-4 py-2 rounded-full hover:bg-blue-600 transition-colors"
+            class="btn btn-primary btn-sm rounded-5 px-3"
             :disabled="!message.trim() && !attachedFiles.length"
             :class="{ 'opacity-50 cursor-not-allowed': !message.trim() && !attachedFiles.length }">
             Send
@@ -435,6 +522,10 @@ const cancelUserInfo = () => {
 </template>
 
 <style scoped>
+.chat_btn {
+    width: 90px;
+    height: 90px;
+}
 .flex-1 {
   scroll-behavior: smooth;
 }
@@ -454,5 +545,8 @@ const cancelUserInfo = () => {
 
 .flex-1::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+.cstm_chat{
+  width: 350px;
 }
 </style>

@@ -7,12 +7,77 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Message;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class ChatController extends Controller
 {
+    private function extractUserInfoFieldFromMessage(string $message, string $label): ?string
+    {
+        $pattern = '/^' . preg_quote($label, '/') . '\\s*:\\s*(.+)\\s*$/mi';
+        if (preg_match($pattern, $message, $matches) !== 1) {
+            return null;
+        }
+
+        $value = trim((string) ($matches[1] ?? ''));
+        return $value !== '' ? $value : null;
+    }
+
+    private function applyVisitorUserInfoToChat(Request $request, Chat $chat): void
+    {
+        if ($request->input('message_type') !== 'user_info_response' || $request->input('sender_type') !== 'visitor') {
+            return;
+        }
+
+        $message = (string) ($request->input('message') ?? '');
+
+        $existingRegistrationNo = is_string($chat->registration_no) ? trim($chat->registration_no) : null;
+
+        $phone = $request->input('phone') ?: $this->extractUserInfoFieldFromMessage($message, 'Phone No');
+        $customerName = $request->input('customer_name') ?: $this->extractUserInfoFieldFromMessage($message, 'Customer Name');
+        $registrationNo = $request->input('registration_no') ?: $this->extractUserInfoFieldFromMessage($message, 'Registration No');
+        $email = $request->input('email') ?: $this->extractUserInfoFieldFromMessage($message, 'Email');
+
+        $phone = is_string($phone) ? trim($phone) : null;
+        $customerName = is_string($customerName) ? trim($customerName) : null;
+        $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+        $email = is_string($email) ? trim($email) : null;
+        if ($email === '') $email = null;
+
+        if (!$phone || !$customerName || !$registrationNo) {
+            return;
+        }
+
+        if (strlen($phone) > 50 || strlen($customerName) > 255 || strlen($registrationNo) > 100) {
+            return;
+        }
+
+        if ($email) {
+            if (strlen($email) > 255 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                $email = null;
+            }
+        }
+
+        $chat->phone = $phone;
+        $chat->customer_name = $customerName;
+        $chat->registration_no = $registrationNo;
+        $chat->email = $email;
+        $chat->user_info_submitted_at = now();
+
+        // When the visitor submits a different registration number, any previously fetched
+        // third-party data/PDF should be considered stale (so hide "Send PDF" until re-fetch).
+        $incomingRegistrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+        if (($existingRegistrationNo ?? '') !== ($incomingRegistrationNo ?? '')) {
+            $chat->external_api_status = null;
+            $chat->external_api_error = null;
+            $chat->external_api_response = null;
+            $chat->external_api_fetched_at = null;
+            $chat->external_api_pdf_sent_at = null;
+        }
+    }
+
     private function resolveCurrentUrl(Request $request): ?string
     {
         $url = $request->input('current_url') ?: $request->header('referer');
@@ -27,67 +92,99 @@ class ChatController extends Controller
 
     public function sendMessage(Request $request)
     {
+        // dd($request->message_type,$request->phone,$request->customer_name,$request->registration_no,$request->email,);
         $request->validate([
             'message' => 'required_without:attachments|nullable|string',
             'sender_type' => 'required|string',
             'chat_id' => 'required|exists:chats,id',
             'message_type' => 'nullable|string',
             'attachments' => 'nullable|file|max:20480',
+            'phone' => 'nullable|string|max:50',
+            'customer_name' => 'nullable|string|max:255',
+            'registration_no' => 'nullable|string|max:100',
+            'email' => 'nullable|string|max:255',
         ]);
 
-        $chat = Chat::find($request->chat_id);
+        try {
+            $chat = Chat::find($request->chat_id);
 
-        if ($request->sender_type === 'visitor') {
-            $chat->last_activity = now();
-            broadcast(new \App\Events\ChatPing($chat));
-        }
-
-        $message = $request->message;
-        $chat_message = '';
-        $filePath = null;
-        if ($request->hasFile('attachments')) {
-            $uploaded = $request->file('attachments');
-            if (is_array($uploaded)) {
-                $uploaded = $uploaded[0] ?? null;
+            if ($request->sender_type === 'visitor') {
+                $chat->last_activity = now();
+                broadcast(new \App\Events\ChatPing($chat));
             }
 
-            if ($uploaded) {
-                $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
-                $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+            $this->applyVisitorUserInfoToChat($request, $chat);
 
-                $fileName = (string) Str::uuid() . '.' . $ext;
-                $dir = 'chat-attachments/' . $chat->id;
-                $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+            $chat_message = [];
+
+            if ($request->message_type == 'user_info_response') {
+                $chat_message = [
+                    'type' => 'user_info_response',
+                    'name' => $request->customer_name,
+                    'email' => $request->email,
+                    'phone' => $request->phone,
+                    'registration_no' => $request->registration_no,
+                ];
+            }else{
+                $chat_message = $request->message;
             }
-        }
+            // dd($chat_message);
+            $filePath = null;
+            if ($request->hasFile('attachments')) {
+                $uploaded = $request->file('attachments');
+                if (is_array($uploaded)) {
+                    $uploaded = $uploaded[0] ?? null;
+                }
 
-        $message = Message::create([
-            'chat_id' => $chat->id,
-            'sender_type' => $request->sender_type,
-            'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
-            'message_type' => $request->message_type,
-            'attachments' => $filePath,
-        ]);
+                if ($uploaded) {
+                    $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
+                    $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
 
-        // keep chat list ordering consistent
-        $chat->last_message_at = $message->created_at;
-        if (!$chat->ip) {
-            $chat->ip = $request->ip();
-        }
-        $currentUrl = $this->resolveCurrentUrl($request);
-        if ($currentUrl) {
-            $chat->current_url = $currentUrl;
-        }
-        // if the agent is sending, assume they have the chat open/read
-        if ($request->sender_type === 'agent') {
-            $chat->agent_last_read_at = now();
-        }
-        $chat->save();
+                    $fileName = (string) Str::uuid() . '.' . $ext;
+                    $dir = 'chat-attachments/' . $chat->id;
+                    $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+                }
+            }
 
-        broadcast(new MessageSent($message));
+            $message = Message::create([
+                'chat_id' => $chat->id,
+                'sender_type' => $request->sender_type,
+                'message' => is_array($chat_message) ? json_encode($chat_message) : $chat_message,
+                'message_type' => $request->message_type,
+                'attachments' => $filePath,
+            ]);
 
-        // return response()->json(['success' => true, 'message' => $message]);
-        return response()->noContent();
+            // keep chat list ordering consistent
+            $chat->last_message_at = $message->created_at;
+            if (!$chat->ip) {
+                $chat->ip = $request->ip();
+            }
+            $currentUrl = $this->resolveCurrentUrl($request);
+            if ($currentUrl) {
+                $chat->current_url = $currentUrl;
+            }
+            // if the agent is sending, assume they have the chat open/read
+            if ($request->sender_type === 'agent') {
+                $chat->agent_last_read_at = now();
+            }
+            $chat->save();
+
+            broadcast(new MessageSent($message));
+
+            return response()->noContent();
+        } catch (\Throwable $e) {
+            report($e);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'Failed to send message. Please try again.',
+                ], 500);
+            }
+
+            return back()->withErrors([
+                'message' => 'Failed to send message. Please try again.',
+            ]);
+        }
     }
 
     private function assertCanAccessAttachment(Request $request, Message $message): void
@@ -129,8 +226,15 @@ class ChatController extends Controller
         if (!$disk->exists($message->attachments)) {
             abort(404);
         }
+        $path = $disk->path($message->attachments);
+        $ext = strtolower((string) pathinfo($message->attachments, PATHINFO_EXTENSION));
+        if (in_array($ext, ['html', 'htm'], true)) {
+            return response()->file($path, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+            ]);
+        }
 
-        return response()->file($disk->path($message->attachments));
+        return response()->file($path);
     }
 
     public function downloadAttachment(Request $request, Message $message)
@@ -160,6 +264,7 @@ class ChatController extends Controller
         $chat = Chat::firstOrCreate(
             ['visitor_id' => $visitorId],
             [
+                'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
             ]
@@ -176,8 +281,12 @@ class ChatController extends Controller
             $chat->save();
         }
 
-       $messages = $chat->messages()->latest()->take(5)->get();
-        broadcast(new NewChat($chat));
+        $messages = $chat->messages()->latest()->take(5)->get()->reverse()->values();
+        try {
+            broadcast(new NewChat($chat));
+        } catch (\Throwable $e) {
+            report($e);
+        }
         return response()->json([
             'chat' => $chat,
             'messages' => $messages
@@ -239,8 +348,12 @@ class ChatController extends Controller
             $chat->save();
         }
         $messages = $chat->messages()->latest()->take(5)->get();
-    
-        broadcast(new NewChat($chat));
+
+        try {
+            broadcast(new NewChat($chat));
+        } catch (\Throwable $e) {
+            report($e);
+        }
     
         return response()->json(['chat' => $chat, 'messages' => $messages]);
     }
@@ -248,65 +361,125 @@ class ChatController extends Controller
     public function externalSendMessage(Request $request)
     {
         $request->validate([
-            'chat_id' => 'required|exists:chats,id',
-            'message' => 'required|string',
+            'message' => 'required_without:attachments|nullable|string',
             'sender_type' => 'required|string',
+            'chat_id' => 'required|exists:chats,id',
             'message_type' => 'nullable|string',
             'current_url' => 'nullable|string|max:2048',
+            'attachments' => 'nullable|file|max:20480',
+            'phone' => 'nullable|string|max:50',
+            'customer_name' => 'nullable|string|max:255',
+            'registration_no' => 'nullable|string|max:100',
+            'email' => 'nullable|string|max:255',
         ]);
-    
-        $chat = Chat::find($request->chat_id);
-        if ($request->sender_type === 'visitor') {
-            $chat->last_activity = now();
-            broadcast(new \App\Events\ChatPing($chat));
-        }
-        $message = Message::create([
-            'chat_id'     => $chat->id,
-            'sender_type' => $request->sender_type,
-            'message'     => $request->message,
-            'message_type' => $request->message_type,
-        ]);
-    
-        $chat->last_message_at = $message->created_at;
-        if (!$chat->ip) {
-            $chat->ip = $request->ip();
-        }
-        $currentUrl = $this->resolveCurrentUrl($request);
-        if ($currentUrl) {
-            $chat->current_url = $currentUrl;
-        }
-        if ($request->sender_type === 'agent') {
-            $chat->agent_last_read_at = now();
-        }
-        $chat->save();
 
-        broadcast(new MessageSent($message));
-        return response()->noContent();
+        try {
+            $chat = Chat::find($request->chat_id);
+            if ($request->sender_type === 'visitor') {
+                $chat->last_activity = now();
+                broadcast(new \App\Events\ChatPing($chat));
+            }
+
+            $this->applyVisitorUserInfoToChat($request, $chat);
+
+            $chat_message = '';
+            $filePath = null;
+            if ($request->hasFile('attachments')) {
+                $uploaded = $request->file('attachments');
+                if (is_array($uploaded)) {
+                    $uploaded = $uploaded[0] ?? null;
+                }
+
+                if ($uploaded) {
+                    $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
+                    $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+
+                    $fileName = (string) Str::uuid() . '.' . $ext;
+                    $dir = 'chat-attachments/' . $chat->id;
+                    $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+                }
+            }
+
+            $message = Message::create([
+                'chat_id' => $chat->id,
+                'sender_type' => $request->sender_type,
+                'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
+                'message_type' => $request->message_type,
+                'attachments' => $filePath,
+            ]);
+
+            $chat->last_message_at = $message->created_at;
+            if (!$chat->ip) {
+                $chat->ip = $request->ip();
+            }
+            $currentUrl = $this->resolveCurrentUrl($request);
+            if ($currentUrl) {
+                $chat->current_url = $currentUrl;
+            }
+            if ($request->sender_type === 'agent') {
+                $chat->agent_last_read_at = now();
+            }
+            $chat->save();
+
+            broadcast(new MessageSent($message));
+            return response()->noContent();
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Failed to send message. Please try again.',
+            ], 500);
+        }
     }
 
     // Update last activity from visitor ping
+    // public function ping(Request $request)
+    // {
+    //     $request->validate([
+    //         'chat_id' => 'required|exists:chats,id',
+    //         'current_url' => 'nullable|string|max:2048',
+    //     ]);
+    //     $chat = Chat::find($request->chat_id);
+    //     $chat->last_activity = now();
+    //     if (!$chat->ip) {
+    //         $chat->ip = $request->ip();
+    //     }
+    //     $currentUrl = $this->resolveCurrentUrl($request);
+    //     if ($currentUrl) {
+    //         $chat->current_url = $currentUrl;
+    //     }
+    //     $chat->save();
+
+    //     broadcast(new \App\Events\ChatPing($chat));
+
+    //     return response()->json(['status' => 'ok']);
+    // }
+
+
     public function ping(Request $request)
     {
-        $request->validate([
-            'chat_id' => 'required|exists:chats,id',
+        $validated = $request->validate([
+            'chat_id'     => 'required|exists:chats,id',
             'current_url' => 'nullable|string|max:2048',
         ]);
-        $chat = Chat::find($request->chat_id);
-        $chat->last_activity = now();
-        if (!$chat->ip) {
-            $chat->ip = $request->ip();
-        }
-        $currentUrl = $this->resolveCurrentUrl($request);
-        if ($currentUrl) {
-            $chat->current_url = $currentUrl;
-        }
-        $chat->save();
 
-        // broadcast ping so agents can mark online
+        $currentUrl = $this->resolveCurrentUrl($request);
+
+        $updates = [
+            'last_activity' => now(),
+            'ip'            => DB::raw("COALESCE(ip, '{$request->ip()}')"),
+        ];
+
+        if ($currentUrl) {
+            $updates['current_url'] = $currentUrl;
+        }
+       Chat::where('id', $validated['chat_id'])->update($updates);
+       $chat = Chat::find($validated['chat_id']);
         broadcast(new \App\Events\ChatPing($chat));
 
         return response()->json(['status' => 'ok']);
     }
+
 
     public function sendUserInfo(Request $request)
     {

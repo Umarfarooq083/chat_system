@@ -1,0 +1,9 @@
+config:
+  target: "http://127.0.0.1:8000/agent/chats"  # 👈 yahan apna URL likho
+  phases:
+    - duration: 120
+      arrivalRate: 500
+scenarios:
+  - flow:
+      - get:
+          url: "/"

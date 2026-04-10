@@ -1,12 +1,18 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch,computed } from 'vue'
 import axios from 'axios'
+import { extractErrorMessage } from '../../utils/extractErrorMessage'
+import { beep, setupAudioUnlock } from '../../utils/beep'
 
 // Props from backend
 const props = defineProps({
   chats: {
     type: Array,
+    default: () => []
+  },
+  auth_user: {
+    type: Object,
     default: () => []
   },
   pollCursor: {
@@ -19,12 +25,31 @@ const chats = ref([])
 const selectedChat = ref(null)
 const messages = ref([])
 const replyMessage = ref('')
+const sendError = ref('')
+const externalFetching = ref(false)
+const externalPdfSending = ref(false)
+const externalHtmlSending = ref(false)
 const markingRead = ref(new Set())
 const subscribedChatIds = new Set()
 const pollCursor = ref(props.pollCursor)
 let onlineFlagsIntervalId = null
 let pollIntervalId = null
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
+// Chat feedback state
+const feedbacks = ref([])
+const inquiries = ref([])
+const feedbackLoading = ref(false)
+const feedbackSaving = ref(false)
+const showFeedbackPanel = ref(false)
+const feedbackForm = ref({
+  registration_no: '',
+  information: [],
+  complain: [],
+  request_type: [],
+})
+const feedbackError = ref('')
+const selectedInquiries = ref({});
 // File attachment state
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
@@ -46,6 +71,7 @@ onMounted(() => {
   chats.value = props.chats || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
+  setupAudioUnlock()
 })
 
 onBeforeUnmount(() => {
@@ -91,18 +117,220 @@ watch(() => props.chats, (newChats) => {
 const selectChat = async (chat) => {
   selectedChat.value = chat
   messages.value = []
+  feedbacks.value = []
+  inquiries.value = []
+  feedbackError.value = ''
+  showFeedbackPanel.value = false
   chat.unread_count = 0
   markChatRead(chat.id, true)
-
+  
   try {
     const response = await axios.get(`/agent/chats/${chat.id}/messages`, {
       params: { limit: 10 }
     })
     if (response.data?.chat) Object.assign(chat, response.data.chat)
     messages.value = Array.isArray(response.data?.messages) ? response.data.messages : []
+    await fetchFeedbacks(chat.id)
   } catch (e) {
     messages.value = []
   }
+}
+
+const fetchFeedbacks = async (chatId) => {
+  if (!chatId) return
+  feedbackLoading.value = true
+  try {
+    const response = await axios.get(`/agent/chats/${chatId}/feedbacks`)
+    
+    feedbacks.value = Array.isArray(response.data?.feedbacks) ? response.data.feedbacks : []
+    inquiries.value = Array.isArray(response.data?.inquiries) ? response.data.inquiries : []
+
+    selectedInquiries.value = {}
+    inquiries.value.forEach(item => {
+      selectedInquiries.value[item.id] = []
+    })
+
+    feedbackError.value = ''
+  } catch (e) {
+    feedbacks.value = []
+    inquiries.value = []
+    feedbackError.value = extractErrorMessage(e, 'Failed to load chat feedback.')
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+const openFeedbackPanel = async (chat, event) => {
+  if (event?.stopPropagation) event.stopPropagation()
+  if (!chat?.id) return
+  if (selectedChat.value?.id !== chat.id) {
+    await selectChat(chat)
+  } else if (!feedbacks.value.length) {
+    await fetchFeedbacks(chat.id)
+  }
+  showFeedbackPanel.value = true
+}
+
+const closeFeedbackPanel = () => {
+  showFeedbackPanel.value = false
+  feedbackForm.value = { information: [], complain: [], request_type: [], registration_no: ''  }
+  feedbackError.value = ''
+}
+
+const submitFeedback = async () => {
+  const chatId = selectedChat.value?.id
+  if (!chatId) return
+
+  feedbackSaving.value = true
+
+  try {
+    const payload = {
+      registration_no: feedbackForm.value.registration_no,
+      inquiries: selectedInquiries.value
+    }
+
+    const response = await axios.post(`/agent/chats/${chatId}/feedbacks`, payload)
+
+    if (response.data?.feedback) {
+      feedbacks.value = [response.data.feedback, ...feedbacks.value]
+    } else {
+      await fetchFeedbacks(chatId)
+    }
+
+    // ✅ Reset properly
+    inquiries.value.forEach(item => {
+      selectedInquiries.value[item.id] = []
+    })
+
+    feedbackForm.value.registration_no = ''
+    feedbackError.value = ''
+
+  } catch (e) {
+    feedbackError.value = extractErrorMessage(e, 'Failed to save feedback.')
+  } finally {
+    feedbackSaving.value = false
+  }
+}
+
+onMounted(() => {
+  inquiries.value.forEach(item => {
+    selectedInquiries.value[item.id] = [];
+  });
+});
+
+const formatFeedbackDate = (ts) => {
+  if (!ts) return ''
+  try {
+    return new Date(ts).toLocaleString()
+  } catch (e) {
+    return ''
+  }
+}
+
+const mergeChatIntoList = (updated) => {
+  if (!updated?.id) return
+  const idx = chats.value.findIndex(c => c.id === updated.id)
+  if (idx !== -1) Object.assign(chats.value[idx], updated)
+  if (selectedChat.value?.id === updated.id) Object.assign(selectedChat.value, updated)
+}
+
+const fetchExternalData = async (chat) => {
+  if (!chat?.id) return
+  externalFetching.value = true
+  try {
+    const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`)
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')
+  } finally {
+    externalFetching.value = false
+  }
+}
+
+const sendExternalPdf = async (chat, registrationNo = null) => {
+  if (!chat?.id) return
+  externalPdfSending.value = true
+  try {
+    const payload = {}
+    const reg = (registrationNo || '').toString().trim()
+    if (reg) payload.registration_no = reg
+
+    const response = await axios.post(`/agent/chats/${chat.id}/external/send-pdf`, payload)
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+    if (response.data?.message) addMessage(chat.id, response.data.message)
+    moveChatToTop(chat.id)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to generate/send PDF. Please try again.')
+  } finally {
+    externalPdfSending.value = false
+  }
+}
+
+const sendExternalHtml = async (chat, registrationNo = null) => {
+  if (!chat?.id) return
+  externalHtmlSending.value = true
+  try {
+    const payload = {}
+    const reg = (registrationNo || '').toString().trim()
+    if (reg) payload.registration_no = reg
+
+    const response = await axios.post(`/agent/chats/${chat.id}/external/send-html`, payload)
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+    if (response.data?.message) addMessage(chat.id, response.data.message)
+    moveChatToTop(chat.id)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to send HTML. Please try again.')
+  } finally {
+    externalHtmlSending.value = false
+  }
+}
+
+const registrationNoForUserInfoMessage = (msg) => {
+  if (!msg || msg.message_type !== 'user_info_response') return null
+  var decoded = JSON.parse(msg.message)
+  return decoded.registration_no
+}
+
+
+const fetchExternalDataForMessage = async (chat, msg) => {
+  if (!chat?.id) return
+  const registrationNo = registrationNoForUserInfoMessage(msg)
+  if (!registrationNo) {
+    sendError.value = 'Registration No is missing in the user info message.'
+    return
+  }
+
+  externalFetching.value = true
+  try {
+    const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`, { registration_no: registrationNo })
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')
+  } finally {
+    externalFetching.value = false
+  }
+}
+
+const sendExternalPdfForMessage = async (chat, msg) => {
+  const registrationNo = registrationNoForUserInfoMessage(msg)
+  return sendExternalPdf(chat, registrationNo)
+}
+
+const sendExternalHtmlForMessage = async (chat, msg) => {
+  const registrationNo = registrationNoForUserInfoMessage(msg)
+  return sendExternalHtml(chat, registrationNo)
+}
+
+const canSendPdfForMessage = (chat, msg) => {
+  const msgReg = (registrationNoForUserInfoMessage(msg) || '').toString().trim()
+  const chatReg = (chat?.registration_no || '').toString().trim()
+  return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
+}
+
+const canSendHtmlForMessage = (chat, msg) => {
+  const msgReg = (registrationNoForUserInfoMessage(msg) || '').toString().trim()
+  const chatReg = (chat?.registration_no || '').toString().trim()
+  return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
 }
 
 const triggerFileInput = () => {
@@ -119,6 +347,10 @@ const addFiles = (newFiles) => {
   // only take the first file — one at a time
   const file = newFiles[0]
   if (!file) return
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    sendError.value = 'File too large. Maximum size is 20 MB.'
+    return
+  }
   attachedFiles.value = [] // replace any existing
   const isImage = file.type.startsWith('image/')
   const preview = isImage ? URL.createObjectURL(file) : null
@@ -190,8 +422,10 @@ const sendReply = async () => {
         sender_type: 'agent'
       })
     }
+    sendError.value = ''
   } catch (e) {
     // restore on error
+    sendError.value = extractErrorMessage(e, 'Failed to send. Please try again.')
     replyMessage.value = tempMessage
     attachedFiles.value = tempFiles
   }
@@ -216,11 +450,13 @@ const deleteChat = async (chat, event) => {
 
 // Show user info form
 const showUserInfoForm = async (chat, event) => {
-  event.stopPropagation()
-  selectChat(chat)
+  if (event?.stopPropagation) event.stopPropagation()
+  if (selectedChat.value?.id !== chat?.id) {
+    await selectChat(chat)
+  }
   const formData = {
     chat_id: chat.id,
-    message: 'Please provide your contact information by filling out the form below.',
+    message: 'Please provide your information: Phone No (required), Customer Name (required), Registration No (required). Email is optional.',
     sender_type: 'agent',
     message_type: 'user_info_request'
   }
@@ -234,6 +470,29 @@ const moveChatToTop = (chatId) => {
   if (index <= 0) return
   const [chat] = chats.value.splice(index, 1)
   chats.value.unshift(chat)
+}
+
+const getUserInfo = (msg) => {
+  try {
+    return typeof msg.message === 'string'
+      ? JSON.parse(msg.message)
+      : msg.message
+  } catch (e) {
+    return {}
+  }
+}
+
+const closeChat = async (chat, event) => {
+  event.stopPropagation()
+  if (!confirm('Are you sure you want to close this chat?')) return
+  try {
+    await axios.post(`/agent/chats/${chat.id}/close`)
+    const existing = chats.value.find(c => c.id === chat.id)
+    if (existing) existing.status = 'close'
+    if (selectedChat.value && selectedChat.value.id === chat.id) {
+      selectedChat.value.status = 'close'
+    }
+  } catch (e) { }
 }
 
 const markChatRead = async (chatId, force = false) => {
@@ -251,14 +510,44 @@ const markChatRead = async (chatId, force = false) => {
   }
 }
 
+const resetExternalApiState = (chatId) => {
+  const chat = chats.value.find(c => c.id === chatId)
+  if (!chat) return
+
+  chat.external_api_status = null
+  chat.external_api_error = null
+  chat.external_api_response = null
+  chat.external_api_fetched_at = null
+  chat.external_api_pdf_sent_at = null
+
+  if (selectedChat.value?.id === chatId) {
+    selectedChat.value.external_api_status = null
+    selectedChat.value.external_api_error = null
+    selectedChat.value.external_api_response = null
+    selectedChat.value.external_api_fetched_at = null
+    selectedChat.value.external_api_pdf_sent_at = null
+  }
+}
+
 const addMessage = (chatId, message) => {
   const chat = chats.value.find(c => c.id === chatId)
   if (!chat) return
   if (chat.latest_message?.id === message.id) return
+
+  // If visitor submits the info form again (possibly for a different registration),
+  // treat any previously fetched external data as stale until re-fetched.
+  if (message?.message_type === 'user_info_response' && message?.sender_type === 'visitor') {
+    resetExternalApiState(chatId)
+  }
+
   if (message.sender_type === 'visitor') chat.is_online = true
   chat.last_message_at = message.created_at
   chat.latest_message = message
   if (message.sender_type === 'visitor') {
+    // Beep for assigned agent when visitor sends a message
+    if (chat?.assigned_agent_id === props.auth_user?.id) {
+      beep()
+    }
     if (selectedChat.value && selectedChat.value.id === chatId) {
       chat.unread_count = 0
       markChatRead(chatId, true)
@@ -315,6 +604,22 @@ onMounted(() => {
   // pollIntervalId = setInterval(pollForChats, 5000)
 })
 
+const filteredOpenChats = computed(() => {
+  return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
+});
+
+const filteredClosedChats = computed(() => {
+  return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'close');
+});
+
+const filteredUnassignChats = computed(() => {
+  return chats.value.filter(chat => chat?.assigned_agent_id == null);
+});
+
+const filteredGlobalChats = computed(() => {
+  return chats.value.filter(chat => chat?.assigned_agent_id != props.auth_user?.id && chat?.assigned_agent_id != null);
+});
+
 const subscribeToChat = (chatId) => {
   if (subscribedChatIds.has(chatId)) return
   if (!window.Echo) return
@@ -334,11 +639,40 @@ const subscribeToChat = (chatId) => {
     })
     .error((error) => console.error('Error subscribing to chat channel:', error))
 }
+
+const filteredRegistrationNo = computed(() => {
+  return messages.value.filter(msg => msg?.message_type === 'user_info_response');
+});
+
+const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
+  if (!relativeOrAbsoluteUrl) return null
+  if (/^https?:\/\//i.test(relativeOrAbsoluteUrl)) return relativeOrAbsoluteUrl
+
+  const cfg = window.ChatConfig || {}
+  const apiBase = (cfg.apiBase || '').toString().trim()
+
+  // For external widgets, `apiBase` is often like `https://your-domain.com/api`.
+  // Attachments live on the web host root, so we only use the URL origin, not the `/api` path.
+  if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      const origin = new URL(apiBase).origin
+      return origin + relativeOrAbsoluteUrl
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // If apiBase is not absolute, we can't reliably resolve cross-domain attachments.
+  return relativeOrAbsoluteUrl
+}
+const attachmentViewUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_view_url))
+const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
+
 </script>
 
 <template>
   <AuthenticatedLayout>
-    <template #header>
+    <!-- <template #header>
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600 text-white">
@@ -354,43 +688,40 @@ const subscribeToChat = (chatId) => {
           Live
         </div>
       </div>
-    </template>
-
+    </template> -->
     <!-- WORKSPACE -->
-    <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
-      style="height: calc(100vh - 130px);">
 
+    <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
+      style="height: calc(100vh - 85px);">
       <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-r border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
-
-        <!-- Sidebar top stats -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
-            <div></div>
-            <div
+            <div>Recent chats</div>
+            <!-- <div
               class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
               {{chats.filter(c => c.is_online).length}} online
-            </div>
+            </div> -->
           </div>
         </div>
-
-        <!-- Chat items list -->
+        
+        <!-- Chat items list recent chats -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in chats" :key="chat.id" @click="selectChat(chat)" :class="[
-            'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-            selectedChat?.id === chat.id
-              ? 'bg-indigo-50 ring-1 ring-indigo-200'
-              : chat.unread_count > 0
-                ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                : 'hover:bg-slate-50'
-          ]">
+          <div v-for="chat in filteredOpenChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]"> 
             <!-- Avatar -->
-            <div class="relative flex-shrink-0">
+            <div class="relative flex-shrink-0" >
               <div :class="[
                 'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
-                selectedChat?.id === chat.id
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
                   ? 'bg-indigo-600 text-white'
                   : 'bg-slate-100 text-slate-500'
               ]">
@@ -400,14 +731,102 @@ const subscribeToChat = (chatId) => {
                 'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
                 chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
               ]"></span>
-              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id"
+              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
                 class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
               </span>
             </div>
 
+            <!-- Text Info -->
+            <div class="flex-1 min-w-0 pr-12" >
+              <div class="flex items-center gap-2 mb-0.5">
+                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat #{{ chat.id }} 
+                </span>
+                <span v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;">
+                  {{ chat.unread_count }}
+                </span>
+              </div>
+              
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
+              </p>
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1" >
+              <button @click="closeChat(chat, $event)" title="Close Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-600 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <path d="M18 6 6 18" />
+                  <path d="M6 6l12 12" />
+                </svg>
+              </button>
+              <!-- <button @click="deleteChat(chat, $event)" title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button> -->
+            </div>
+          </div>
+        </div>
+
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Previous chats</div>
+          </div>
+        </div>
+        
+        <!-- Chat items list previous chats -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div v-for="chat in filteredClosedChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]"> 
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+              <div :class="[
+                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
+              ]">
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
+              </span>
+            </div>
 
             <!-- Text Info -->
-            <div class="flex-1 min-w-0 pr-12">
+            <div class="flex-1 min-w-0 pr-12" >
               <div class="flex items-center gap-2 mb-0.5">
                 <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
                   Chat #{{ chat.id }}
@@ -418,8 +837,11 @@ const subscribeToChat = (chatId) => {
                   {{ chat.unread_count }}
                 </span>
               </div>
-              <p class="text-xs text-slate-500 truncate mb-1">
-                {{ chat?.latest_message?.message || 'No messages yet' }}
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
               </p>
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
@@ -434,12 +856,6 @@ const subscribeToChat = (chatId) => {
 
             <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
-              <button @click="showUserInfoForm(chat, $event)" title="Send Info Form"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 12 3 3l18 9-18 9 3-9Z" />
-                </svg>
-              </button>
               <button @click="deleteChat(chat, $event)" title="Delete Chat"
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -458,9 +874,7 @@ const subscribeToChat = (chatId) => {
 
       <!-- ═══════════════════ MAIN PANEL ═══════════════════ -->
       <main class="flex-1 flex flex-col bg-slate-50 overflow-hidden">
-
         <template v-if="selectedChat">
-
           <!-- Chat Header -->
           <div class="flex items-center gap-3 px-5 py-3.5 bg-white border-b border-slate-200 shadow-sm">
             <div
@@ -478,15 +892,117 @@ const subscribeToChat = (chatId) => {
                 </span>
               </div>
             </div>
-            <div :class="[
-              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
-              selectedChat.is_online
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-slate-100 text-slate-400 border-slate-200'
-            ]">
-              <span
-                :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
-              {{ selectedChat.is_online ? 'Online' : 'Offline' }}
+
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <!-- header buttons  -->
+              <button @click="openFeedbackPanel(selectedChat)" title="Feedback"
+                class="h-8 px-3 rounded-lg flex items-center justify-center bg-amber-100 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors duration-150">
+                <span class="text-xs font-semibold">Feedback</span>
+                <span v-if="feedbacks.length"
+                  class="ml-2 inline-flex items-center justify-center bg-amber-700 text-white text-[10px] font-bold rounded-full px-1.5 leading-none"
+                  style="height: 16px; min-width: 16px;">{{ feedbacks.length }}</span>
+              </button>
+
+              <button @click="showUserInfoForm(selectedChat)" title="Send Info Form"
+                class="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 12 3 3l18 9-18 9 3-9Z" />
+                </svg>
+              </button>
+
+              
+              <div :class="[
+                'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
+                selectedChat.is_online
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-slate-100 text-slate-400 border-slate-200'
+              ]">
+                <span
+                  :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
+                {{ selectedChat.is_online ? 'Online' : 'Offline' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Chat Feedback Panel -->
+          <div v-if="showFeedbackPanel" class="bg-white border-b border-slate-200">
+            <div class="px-5 py-2 flex items-center justify-between">
+              <!-- <div class="text-sm font-bold text-slate-800"></div>
+              <button type="button" @click="closeFeedbackPanel"
+                class="text-xs font-semibold text-slate-500 hover:text-slate-700">Close</button> -->
+            </div>
+
+            <div class="px-5 pb-4 space-y-3">
+              <div v-if="feedbackError"
+                class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2">
+                {{ feedbackError }}
+              </div>
+
+              <form @submit.prevent="submitFeedback" class="row align-items-center">
+
+                <div class="col-md-4" v-for="inquiryList in inquiries" :key="inquiryList.id">
+                  <select 
+                    class="col-md-2 form-control" 
+                    multiple
+                    v-model="selectedInquiries[inquiryList.id]"
+                  >
+                    <option disabled value="">{{ inquiryList.name }}</option>
+                    <option 
+                      v-for="inqiry in inquiryList.clientTemperature" 
+                      :key="inqiry.id" 
+                      :value="{ id: inqiry.id, name: inqiry.name }"
+                    >
+                      {{ inqiry.name }}
+                    </option>
+                  </select>
+                </div>
+
+                <div class="col-md-4 mt-4">
+                    <select v-model="feedbackForm.registration_no" class="col-md-2 form-control">
+                    <option disabled value="">Registration No</option>
+                    <option value="">Unknown</option>
+                    <option v-for="message in filteredRegistrationNo" :value="getUserInfo(message).registration_no" >
+                     {{ getUserInfo(message).registration_no }}
+                    </option>
+                  </select>
+                </div>
+                
+                <div class="col-md-2 mt-4">
+                    <button type="submit" :disabled="feedbackSaving"
+                      class="btn btn-primary h-10 mr-2">
+                      {{ feedbackSaving ? 'Saving...' : 'Save' }}
+                    </button>
+                    <button type="button" @click="closeFeedbackPanel"
+                      class="btn btn-secondary h-10">
+                      Cancel
+                    </button>
+                </div>
+              </form>
+
+              <div class="border-t border-slate-100 pt-3 max-h-60 overflow-y-auto">
+                
+                <div class="flex items-center justify-between mb-2">
+                  <div class="text-xs font-semibold text-slate-600 uppercase tracking-wider">History</div>
+                  <div v-if="feedbackLoading" class="text-xs text-slate-400">Loading...</div>
+                </div>
+
+                <div v-if="!feedbackLoading && !feedbacks.length" class="text-sm text-slate-400">
+                  No feedback yet.
+                </div>
+
+                <div v-for="fb in feedbacks" :key="fb.id"
+                  class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-xs text-slate-400 flex-shrink-0">
+                      {{ formatFeedbackDate(fb.created_at) }}
+                    </div>
+                  </div>
+                  <div class="text-sm text-slate-700 whitespace-pre-line mt-1">
+                    {{ fb.inquiry_name }} | <strong>Reg: {{ fb.registration }}</strong>
+                  </div>
+                </div>
+
+              </div>
             </div>
           </div>
 
@@ -507,15 +1023,85 @@ const subscribeToChat = (chatId) => {
               <!-- User Info Response -->
               <div v-else-if="msg.message_type === 'user_info_response'"
                 class="max-w-sm bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-                <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
-                  User Information Received:
+                  <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
+                    User Information Received:
+                  </div>
+                  <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line" v-if="msg?.message_type === 'user_info_response'" >
+                   
+                    <div class="text-xs text-emerald-700 space-y-1">
+                      <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                      <div><strong>Email:</strong> {{ getUserInfo(msg).email }}</div>
+                      <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                      <div><strong>Reg No:</strong> {{ getUserInfo(msg).registration_no }}</div>
+                    </div>
+                  </div>
+                <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line" v-else>{{ msg.message  }}</div>
+                
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                  <button type="button" @click="fetchExternalDataForMessage(selectedChat, msg)"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="externalFetching">
+                    {{ externalFetching ? 'Fetching...' : 'Fetch Data' }}
+                  </button>
+                 
+                  <!-- <button v-if="canSendPdfForMessage(selectedChat, msg)"
+                    type="button" @click="sendExternalPdfForMessage(selectedChat, msg)"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="externalPdfSending">
+                    {{ externalPdfSending ? 'Sending...' : 'Send PDF' }}
+                  </button> -->
+
+                  <button v-if="canSendHtmlForMessage(selectedChat, msg)"
+                    type="button" @click="sendExternalHtmlForMessage(selectedChat, msg)"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="externalHtmlSending">
+                    {{ externalHtmlSending ? 'Sending...' : 'Send PDF' }}
+                    <!-- {{ externalHtmlSending ? 'Sending...' : 'Send HTML' }} -->
+                  </button>
                 </div>
-                <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line">{{ msg.message }}</div>
-                <a href="/dashboard"
-                  class="inline-flex items-center gap-2 mt-3 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md">
-                  Fetch Data
-                </a>
+
+                <div v-if="selectedChat?.external_api_status === 'error' && selectedChat?.external_api_error"
+                  class="mt-2 text-xs text-red-700 whitespace-pre-line">
+                  {{ selectedChat.external_api_error }}
+                </div>
               </div>
+
+              <!-- External HTML message -->
+              <div v-else-if="msg.message_type === 'external_data_html'"
+                class="max-w-xl bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+                <div class="text-xs font-bold text-slate-700 mb-2">PDF Sent</div>
+                 <div v-if="attachmentViewUrl(msg)" class="mt-2">
+                    <img v-if="msg.attachment_is_image" :src="attachmentViewUrl(msg)"
+                      :alt="msg.attachment_name || 'Attachment'"
+                      class="max-w-[180px] max-h-40 rounded border border-gray-200 object-cover cursor-pointer"
+                      @click="window.open(attachmentViewUrl(msg), '_blank')" />
+                    
+                    <div v-if="msg.attachment_is_image" class="mt-1 text-right">
+                      <a :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener">
+                      <i class="fa fa-download" aria-hidden="true"></i>
+                      </a>
+                    </div>
+
+                    <a v-else :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener"
+                      class="text-xs underline break-all">
+                      Download {{ msg.attachment_name || 'file' }}
+                    </a>
+                </div>
+                <!-- <iframe v-if="msg.attachment_view_url"
+                  :src="msg.attachment_view_url"
+                  sandbox
+                  class="w-full rounded-lg border border-slate-200 bg-white"
+                  style="height: 320px;"
+                />
+                <iframe v-else
+                  :srcdoc="msg.message"
+                  sandbox
+                  class="w-full rounded-lg border border-slate-200 bg-white"
+                  style="height: 320px;"
+                /> -->
+              </div>
+
+           
 
               <!-- Message with attachments -->
               <div v-else class="flex flex-col gap-1.5"
@@ -604,8 +1190,16 @@ const subscribeToChat = (chatId) => {
               Drop files to attach
             </div>
 
+            <div v-if="sendError" class="px-4 pb-2">
+              <div
+                class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start justify-between gap-2">
+                <span class="whitespace-pre-line">{{ sendError }}</span>
+                <button type="button" class="font-bold leading-none" @click="sendError = ''">×</button>
+              </div>
+            </div>
+
             <!-- Input row -->
-            <form @submit.prevent="sendReply" class="flex items-center gap-0 px-4 py-3">
+            <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="flex items-center gap-0 px-4 py-3">
 
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
@@ -658,6 +1252,174 @@ const subscribeToChat = (chatId) => {
         </div>
 
       </main>
+
+      <!-- RIGHT SIDEBAR -->
+      <aside class="flex flex-col bg-white border-l border-slate-200 overflow-hidden"
+        style="width: 350px; min-width: 350px;">
+        <!-- Sidebar top stats -->
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Unassign chats</div>
+            <div
+              class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              {{chats.filter(c => c.is_online).length}} online
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat items list Unassign chats -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div v-for="chat in filteredUnassignChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id 
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]">
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+              <div :class="[
+                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
+                selectedChat?.id === chat.id 
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
+              ]">
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span v-if="chat.unread_count > 0"
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
+              </span>
+            </div>
+
+            <!-- Text Info -->
+            <div class="flex-1 min-w-0 pr-12">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat #{{ chat.id }} 
+                </span>
+                <span v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;">
+                  {{ chat.unread_count }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
+              </p>
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1">
+              <button @click="deleteChat(chat, $event)" title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Other chats</div>
+          </div>
+        </div> 
+
+        <!-- Chat items list Other chats -->
+         <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div v-for="chat in filteredGlobalChats" :key="chat.id" @click="selectChat(chat)" :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                    : 'hover:bg-slate-50'
+              ]">
+           
+            <div class="relative flex-shrink-0">
+              <div :class="[
+                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
+                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
+              ]">
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
+              </span>
+            </div>
+
+            <div class="flex-1 min-w-0 pr-12">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat #{{ chat.id }}
+                </span>
+                <span v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;">
+                  {{ chat.unread_count }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
+              </p>
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <div class="absolute top-2 right-2 flex flex-col gap-1">
+              <button @click="deleteChat(chat, $event)" title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div> -
+      </aside>
     </div>
 
   </AuthenticatedLayout>

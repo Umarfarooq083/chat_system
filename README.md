@@ -7,6 +7,17 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## Octane (RoadRunner)
+
+- Install deps: `composer install`
+- First-time only: `php artisan octane:install --server=roadrunner`
+- Start (Octane): `composer run dev:octane`
+- Start (classic): `composer run dev`
+
+Notes:
+- RoadRunner binary files (`rr`, `rr.exe`, `.rr.yaml`) are ignored by git. If you deploy Octane, run `php artisan octane:install --server=roadrunner` on the server.
+- On Windows, if you end up with `rr.exe` only, create the expected `rr` file via `Copy-Item .\\rr.exe .\\rr -Force`.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
