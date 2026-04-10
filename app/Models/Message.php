@@ -26,6 +26,10 @@ class Message extends Model
         'attachments',
     ];
 
+    protected $casts = [
+        'message' => 'array',
+    ];
+
     public function chat()
     {
         return $this->belongsTo(Chat::class);

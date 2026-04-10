@@ -12,7 +12,7 @@ const props = defineProps({
     default: () => []
   },
   auth_user: {
-    type: Array,
+    type: Object,
     default: () => []
   },
   pollCursor: {
@@ -28,6 +28,7 @@ const replyMessage = ref('')
 const sendError = ref('')
 const externalFetching = ref(false)
 const externalPdfSending = ref(false)
+const externalHtmlSending = ref(false)
 const markingRead = ref(new Set())
 const subscribedChatIds = new Set()
 const pollCursor = ref(props.pollCursor)
@@ -35,6 +36,20 @@ let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
+// Chat feedback state
+const feedbacks = ref([])
+const inquiries = ref([])
+const feedbackLoading = ref(false)
+const feedbackSaving = ref(false)
+const showFeedbackPanel = ref(false)
+const feedbackForm = ref({
+  registration_no: '',
+  information: [],
+  complain: [],
+  request_type: [],
+})
+const feedbackError = ref('')
+const selectedInquiries = ref({});
 // File attachment state
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
@@ -102,6 +117,10 @@ watch(() => props.chats, (newChats) => {
 const selectChat = async (chat) => {
   selectedChat.value = chat
   messages.value = []
+  feedbacks.value = []
+  inquiries.value = []
+  feedbackError.value = ''
+  showFeedbackPanel.value = false
   chat.unread_count = 0
   markChatRead(chat.id, true)
   
@@ -111,8 +130,100 @@ const selectChat = async (chat) => {
     })
     if (response.data?.chat) Object.assign(chat, response.data.chat)
     messages.value = Array.isArray(response.data?.messages) ? response.data.messages : []
+    await fetchFeedbacks(chat.id)
   } catch (e) {
     messages.value = []
+  }
+}
+
+const fetchFeedbacks = async (chatId) => {
+  if (!chatId) return
+  feedbackLoading.value = true
+  try {
+    const response = await axios.get(`/agent/chats/${chatId}/feedbacks`)
+    
+    feedbacks.value = Array.isArray(response.data?.feedbacks) ? response.data.feedbacks : []
+    inquiries.value = Array.isArray(response.data?.inquiries) ? response.data.inquiries : []
+
+    selectedInquiries.value = {}
+    inquiries.value.forEach(item => {
+      selectedInquiries.value[item.id] = []
+    })
+
+    feedbackError.value = ''
+  } catch (e) {
+    feedbacks.value = []
+    inquiries.value = []
+    feedbackError.value = extractErrorMessage(e, 'Failed to load chat feedback.')
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+const openFeedbackPanel = async (chat, event) => {
+  if (event?.stopPropagation) event.stopPropagation()
+  if (!chat?.id) return
+  if (selectedChat.value?.id !== chat.id) {
+    await selectChat(chat)
+  } else if (!feedbacks.value.length) {
+    await fetchFeedbacks(chat.id)
+  }
+  showFeedbackPanel.value = true
+}
+
+const closeFeedbackPanel = () => {
+  showFeedbackPanel.value = false
+  feedbackForm.value = { information: [], complain: [], request_type: [], registration_no: ''  }
+  feedbackError.value = ''
+}
+
+const submitFeedback = async () => {
+  const chatId = selectedChat.value?.id
+  if (!chatId) return
+
+  feedbackSaving.value = true
+
+  try {
+    const payload = {
+      registration_no: feedbackForm.value.registration_no,
+      inquiries: selectedInquiries.value
+    }
+
+    const response = await axios.post(`/agent/chats/${chatId}/feedbacks`, payload)
+
+    if (response.data?.feedback) {
+      feedbacks.value = [response.data.feedback, ...feedbacks.value]
+    } else {
+      await fetchFeedbacks(chatId)
+    }
+
+    // ✅ Reset properly
+    inquiries.value.forEach(item => {
+      selectedInquiries.value[item.id] = []
+    })
+
+    feedbackForm.value.registration_no = ''
+    feedbackError.value = ''
+
+  } catch (e) {
+    feedbackError.value = extractErrorMessage(e, 'Failed to save feedback.')
+  } finally {
+    feedbackSaving.value = false
+  }
+}
+
+onMounted(() => {
+  inquiries.value.forEach(item => {
+    selectedInquiries.value[item.id] = [];
+  });
+});
+
+const formatFeedbackDate = (ts) => {
+  if (!ts) return ''
+  try {
+    return new Date(ts).toLocaleString()
+  } catch (e) {
+    return ''
   }
 }
 
@@ -155,19 +266,31 @@ const sendExternalPdf = async (chat, registrationNo = null) => {
   }
 }
 
+const sendExternalHtml = async (chat, registrationNo = null) => {
+  if (!chat?.id) return
+  externalHtmlSending.value = true
+  try {
+    const payload = {}
+    const reg = (registrationNo || '').toString().trim()
+    if (reg) payload.registration_no = reg
+
+    const response = await axios.post(`/agent/chats/${chat.id}/external/send-html`, payload)
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
+    if (response.data?.message) addMessage(chat.id, response.data.message)
+    moveChatToTop(chat.id)
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to send HTML. Please try again.')
+  } finally {
+    externalHtmlSending.value = false
+  }
+}
+
 const registrationNoForUserInfoMessage = (msg) => {
   if (!msg || msg.message_type !== 'user_info_response') return null
-  const text = (msg.message || '').toString()
-  if (!text.trim()) return null
-
-  // Be tolerant: older/edited messages may not match the exact "Registration No:" format.
-  const match =
-    text.match(/(?:^|\r?\n)\s*registration\s*(?:no|number)\s*[:\-]?\s*([^\r\n]+)\s*(?:\r?\n|$)/i) ||
-    text.match(/(?:^|\r?\n)\s*reg(?:istration)?\s*(?:no|number)?\s*[:\-]?\s*([^\r\n]+)\s*(?:\r?\n|$)/i)
-
-  const v = (match?.[1] || '').toString().trim()
-  return v ? v : null
+  var decoded = JSON.parse(msg.message)
+  return decoded.registration_no
 }
+
 
 const fetchExternalDataForMessage = async (chat, msg) => {
   if (!chat?.id) return
@@ -193,7 +316,18 @@ const sendExternalPdfForMessage = async (chat, msg) => {
   return sendExternalPdf(chat, registrationNo)
 }
 
+const sendExternalHtmlForMessage = async (chat, msg) => {
+  const registrationNo = registrationNoForUserInfoMessage(msg)
+  return sendExternalHtml(chat, registrationNo)
+}
+
 const canSendPdfForMessage = (chat, msg) => {
+  const msgReg = (registrationNoForUserInfoMessage(msg) || '').toString().trim()
+  const chatReg = (chat?.registration_no || '').toString().trim()
+  return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
+}
+
+const canSendHtmlForMessage = (chat, msg) => {
   const msgReg = (registrationNoForUserInfoMessage(msg) || '').toString().trim()
   const chatReg = (chat?.registration_no || '').toString().trim()
   return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
@@ -336,6 +470,16 @@ const moveChatToTop = (chatId) => {
   if (index <= 0) return
   const [chat] = chats.value.splice(index, 1)
   chats.value.unshift(chat)
+}
+
+const getUserInfo = (msg) => {
+  try {
+    return typeof msg.message === 'string'
+      ? JSON.parse(msg.message)
+      : msg.message
+  } catch (e) {
+    return {}
+  }
 }
 
 const closeChat = async (chat, event) => {
@@ -495,6 +639,35 @@ const subscribeToChat = (chatId) => {
     })
     .error((error) => console.error('Error subscribing to chat channel:', error))
 }
+
+const filteredRegistrationNo = computed(() => {
+  return messages.value.filter(msg => msg?.message_type === 'user_info_response');
+});
+
+const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
+  if (!relativeOrAbsoluteUrl) return null
+  if (/^https?:\/\//i.test(relativeOrAbsoluteUrl)) return relativeOrAbsoluteUrl
+
+  const cfg = window.ChatConfig || {}
+  const apiBase = (cfg.apiBase || '').toString().trim()
+
+  // For external widgets, `apiBase` is often like `https://your-domain.com/api`.
+  // Attachments live on the web host root, so we only use the URL origin, not the `/api` path.
+  if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      const origin = new URL(apiBase).origin
+      return origin + relativeOrAbsoluteUrl
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // If apiBase is not absolute, we can't reliably resolve cross-domain attachments.
+  return relativeOrAbsoluteUrl
+}
+const attachmentViewUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_view_url))
+const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
+
 </script>
 
 <template>
@@ -516,14 +689,13 @@ const subscribeToChat = (chatId) => {
         </div>
       </div>
     </template> -->
-
     <!-- WORKSPACE -->
+
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
       style="height: calc(100vh - 85px);">
       <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-r border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
-        <!-- Sidebar top stats -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Recent chats</div>
@@ -576,8 +748,12 @@ const subscribeToChat = (chatId) => {
                   {{ chat.unread_count }}
                 </span>
               </div>
-              <p class="text-xs text-slate-500 truncate mb-1">
-                {{ chat?.latest_message?.message || 'No messages yet' }}
+              
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
               </p>
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
@@ -661,8 +837,11 @@ const subscribeToChat = (chatId) => {
                   {{ chat.unread_count }}
                 </span>
               </div>
-              <p class="text-xs text-slate-500 truncate mb-1">
-                {{ chat?.latest_message?.message || 'No messages yet' }}
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
               </p>
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
@@ -691,14 +870,11 @@ const subscribeToChat = (chatId) => {
           </div>
         </div>
 
-
       </aside>
 
       <!-- ═══════════════════ MAIN PANEL ═══════════════════ -->
       <main class="flex-1 flex flex-col bg-slate-50 overflow-hidden">
-
         <template v-if="selectedChat">
-
           <!-- Chat Header -->
           <div class="flex items-center gap-3 px-5 py-3.5 bg-white border-b border-slate-200 shadow-sm">
             <div
@@ -718,6 +894,15 @@ const subscribeToChat = (chatId) => {
             </div>
 
             <div class="flex items-center gap-2 flex-shrink-0">
+              <!-- header buttons  -->
+              <button @click="openFeedbackPanel(selectedChat)" title="Feedback"
+                class="h-8 px-3 rounded-lg flex items-center justify-center bg-amber-100 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors duration-150">
+                <span class="text-xs font-semibold">Feedback</span>
+                <span v-if="feedbacks.length"
+                  class="ml-2 inline-flex items-center justify-center bg-amber-700 text-white text-[10px] font-bold rounded-full px-1.5 leading-none"
+                  style="height: 16px; min-width: 16px;">{{ feedbacks.length }}</span>
+              </button>
+
               <button @click="showUserInfoForm(selectedChat)" title="Send Info Form"
                 class="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -725,6 +910,7 @@ const subscribeToChat = (chatId) => {
                 </svg>
               </button>
 
+              
               <div :class="[
                 'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
                 selectedChat.is_online
@@ -734,6 +920,88 @@ const subscribeToChat = (chatId) => {
                 <span
                   :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
                 {{ selectedChat.is_online ? 'Online' : 'Offline' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Chat Feedback Panel -->
+          <div v-if="showFeedbackPanel" class="bg-white border-b border-slate-200">
+            <div class="px-5 py-2 flex items-center justify-between">
+              <!-- <div class="text-sm font-bold text-slate-800"></div>
+              <button type="button" @click="closeFeedbackPanel"
+                class="text-xs font-semibold text-slate-500 hover:text-slate-700">Close</button> -->
+            </div>
+
+            <div class="px-5 pb-4 space-y-3">
+              <div v-if="feedbackError"
+                class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2">
+                {{ feedbackError }}
+              </div>
+
+              <form @submit.prevent="submitFeedback" class="row align-items-center">
+
+                <div class="col-md-4" v-for="inquiryList in inquiries" :key="inquiryList.id">
+                  <select 
+                    class="col-md-2 form-control" 
+                    multiple
+                    v-model="selectedInquiries[inquiryList.id]"
+                  >
+                    <option disabled value="">{{ inquiryList.name }}</option>
+                    <option 
+                      v-for="inqiry in inquiryList.clientTemperature" 
+                      :key="inqiry.id" 
+                      :value="{ id: inqiry.id, name: inqiry.name }"
+                    >
+                      {{ inqiry.name }}
+                    </option>
+                  </select>
+                </div>
+
+                <div class="col-md-4 mt-4">
+                    <select v-model="feedbackForm.registration_no" class="col-md-2 form-control">
+                    <option disabled value="">Registration No</option>
+                    <option value="">Unknown</option>
+                    <option v-for="message in filteredRegistrationNo" :value="getUserInfo(message).registration_no" >
+                     {{ getUserInfo(message).registration_no }}
+                    </option>
+                  </select>
+                </div>
+                
+                <div class="col-md-2 mt-4">
+                    <button type="submit" :disabled="feedbackSaving"
+                      class="btn btn-primary h-10 mr-2">
+                      {{ feedbackSaving ? 'Saving...' : 'Save' }}
+                    </button>
+                    <button type="button" @click="closeFeedbackPanel"
+                      class="btn btn-secondary h-10">
+                      Cancel
+                    </button>
+                </div>
+              </form>
+
+              <div class="border-t border-slate-100 pt-3 max-h-60 overflow-y-auto">
+                
+                <div class="flex items-center justify-between mb-2">
+                  <div class="text-xs font-semibold text-slate-600 uppercase tracking-wider">History</div>
+                  <div v-if="feedbackLoading" class="text-xs text-slate-400">Loading...</div>
+                </div>
+
+                <div v-if="!feedbackLoading && !feedbacks.length" class="text-sm text-slate-400">
+                  No feedback yet.
+                </div>
+
+                <div v-for="fb in feedbacks" :key="fb.id"
+                  class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-xs text-slate-400 flex-shrink-0">
+                      {{ formatFeedbackDate(fb.created_at) }}
+                    </div>
+                  </div>
+                  <div class="text-sm text-slate-700 whitespace-pre-line mt-1">
+                    {{ fb.inquiry_name }} | <strong>Reg: {{ fb.registration }}</strong>
+                  </div>
+                </div>
+
               </div>
             </div>
           </div>
@@ -755,10 +1023,19 @@ const subscribeToChat = (chatId) => {
               <!-- User Info Response -->
               <div v-else-if="msg.message_type === 'user_info_response'"
                 class="max-w-sm bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-                <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
-                  User Information Received:
-                </div>
-                <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line">{{ msg.message }}</div>
+                  <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
+                    User Information Received:
+                  </div>
+                  <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line" v-if="msg?.message_type === 'user_info_response'" >
+                   
+                    <div class="text-xs text-emerald-700 space-y-1">
+                      <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                      <div><strong>Email:</strong> {{ getUserInfo(msg).email }}</div>
+                      <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                      <div><strong>Reg No:</strong> {{ getUserInfo(msg).registration_no }}</div>
+                    </div>
+                  </div>
+                <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line" v-else>{{ msg.message  }}</div>
                 
                 <div class="flex flex-wrap items-center gap-2 mt-3">
                   <button type="button" @click="fetchExternalDataForMessage(selectedChat, msg)"
@@ -767,11 +1044,19 @@ const subscribeToChat = (chatId) => {
                     {{ externalFetching ? 'Fetching...' : 'Fetch Data' }}
                   </button>
                  
-                  <button v-if="canSendPdfForMessage(selectedChat, msg)"
+                  <!-- <button v-if="canSendPdfForMessage(selectedChat, msg)"
                     type="button" @click="sendExternalPdfForMessage(selectedChat, msg)"
                     class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
                     :disabled="externalPdfSending">
                     {{ externalPdfSending ? 'Sending...' : 'Send PDF' }}
+                  </button> -->
+
+                  <button v-if="canSendHtmlForMessage(selectedChat, msg)"
+                    type="button" @click="sendExternalHtmlForMessage(selectedChat, msg)"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="externalHtmlSending">
+                    {{ externalHtmlSending ? 'Sending...' : 'Send PDF' }}
+                    <!-- {{ externalHtmlSending ? 'Sending...' : 'Send HTML' }} -->
                   </button>
                 </div>
 
@@ -780,6 +1065,43 @@ const subscribeToChat = (chatId) => {
                   {{ selectedChat.external_api_error }}
                 </div>
               </div>
+
+              <!-- External HTML message -->
+              <div v-else-if="msg.message_type === 'external_data_html'"
+                class="max-w-xl bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+                <div class="text-xs font-bold text-slate-700 mb-2">PDF Sent</div>
+                 <div v-if="attachmentViewUrl(msg)" class="mt-2">
+                    <img v-if="msg.attachment_is_image" :src="attachmentViewUrl(msg)"
+                      :alt="msg.attachment_name || 'Attachment'"
+                      class="max-w-[180px] max-h-40 rounded border border-gray-200 object-cover cursor-pointer"
+                      @click="window.open(attachmentViewUrl(msg), '_blank')" />
+                    
+                    <div v-if="msg.attachment_is_image" class="mt-1 text-right">
+                      <a :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener">
+                      <i class="fa fa-download" aria-hidden="true"></i>
+                      </a>
+                    </div>
+
+                    <a v-else :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener"
+                      class="text-xs underline break-all">
+                      Download {{ msg.attachment_name || 'file' }}
+                    </a>
+                </div>
+                <!-- <iframe v-if="msg.attachment_view_url"
+                  :src="msg.attachment_view_url"
+                  sandbox
+                  class="w-full rounded-lg border border-slate-200 bg-white"
+                  style="height: 320px;"
+                />
+                <iframe v-else
+                  :srcdoc="msg.message"
+                  sandbox
+                  class="w-full rounded-lg border border-slate-200 bg-white"
+                  style="height: 320px;"
+                /> -->
+              </div>
+
+           
 
               <!-- Message with attachments -->
               <div v-else class="flex flex-col gap-1.5"
@@ -987,8 +1309,11 @@ const subscribeToChat = (chatId) => {
                   {{ chat.unread_count }}
                 </span>
               </div>
-              <p class="text-xs text-slate-500 truncate mb-1">
-                {{ chat?.latest_message?.message || 'No messages yet' }}
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
               </p>
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
@@ -1063,8 +1388,11 @@ const subscribeToChat = (chatId) => {
                   {{ chat.unread_count }}
                 </span>
               </div>
-              <p class="text-xs text-slate-500 truncate mb-1">
-                {{ chat?.latest_message?.message || 'No messages yet' }}
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
               </p>
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">

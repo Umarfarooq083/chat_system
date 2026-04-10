@@ -66,7 +66,7 @@ const withToken = (url) => {
 }
 
 const attachmentViewUrl = (msg) => withToken(resolveAttachmentUrl(msg?.attachment_view_url))
-const attachmentDownloadUrl = (msg) => withToken(resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
+const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
@@ -317,6 +317,16 @@ const submitUserInfo = async () => {
   }
 }
 
+const getUserInfo = (msg) => {
+  try {
+    return typeof msg.message === 'string'
+      ? JSON.parse(msg.message)
+      : msg.message
+  } catch (e) {
+    return {}
+  }
+}
+
 const cancelUserInfo = () => {
   showUserForm.value = false
   userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
@@ -356,7 +366,36 @@ const cancelUserInfo = () => {
             <div class="text-xs opacity-75 mb-1">
               {{ msg.sender_type === 'visitor' ? 'You' : 'Agent' }}
             </div>
-            <div class="text-sm whitespace-pre-line">{{ msg.message }}</div>
+           
+            <div class="text-sm whitespace-pre-line" v-if="msg?.message_type === 'user_info_response'">
+              <div class="text-sm whitespace-pre-line">
+                <strong class="text-xs font-bold whitespace-pre-line mb-1.5 flex items-center gap-1.5" style="font-size: 15px;">
+                  User Information Send:
+                </strong>
+                      <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                      <div><strong>Email:</strong> {{ getUserInfo(msg).email }}</div>
+                      <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                      <div><strong>Reg No:</strong> {{ getUserInfo(msg).registration_no }}</div>
+                    </div>
+
+            </div>
+
+            <!-- <div class="text-sm whitespace-pre-line" v-else-if="msg?.message_type === 'external_data_html'">
+              <iframe v-if="attachmentViewUrl(msg)"
+                :src="attachmentViewUrl(msg)"
+                sandbox
+                class="w-full rounded border border-gray-200 bg-white"
+                style="height: 280px;"
+              />
+              <iframe v-else
+                :srcdoc="msg.message"
+                sandbox
+                class="w-full rounded border border-gray-200 bg-white"
+                style="height: 280px;"
+              />
+            </div> -->
+
+            <div class="text-sm whitespace-pre-line" v-else>{{ msg.message }}</div>
             <div v-if="attachmentViewUrl(msg)" class="mt-2">
               <img v-if="msg.attachment_is_image" :src="attachmentViewUrl(msg)"
                 :alt="msg.attachment_name || 'Attachment'"

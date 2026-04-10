@@ -92,6 +92,7 @@ class ChatController extends Controller
 
     public function sendMessage(Request $request)
     {
+        // dd($request->message_type,$request->phone,$request->customer_name,$request->registration_no,$request->email,);
         $request->validate([
             'message' => 'required_without:attachments|nullable|string',
             'sender_type' => 'required|string',
@@ -114,7 +115,20 @@ class ChatController extends Controller
 
             $this->applyVisitorUserInfoToChat($request, $chat);
 
-            $chat_message = '';
+            $chat_message = [];
+
+            if ($request->message_type == 'user_info_response') {
+                $chat_message = [
+                    'type' => 'user_info_response',
+                    'name' => $request->customer_name,
+                    'email' => $request->email,
+                    'phone' => $request->phone,
+                    'registration_no' => $request->registration_no,
+                ];
+            }else{
+                $chat_message = $request->message;
+            }
+            // dd($chat_message);
             $filePath = null;
             if ($request->hasFile('attachments')) {
                 $uploaded = $request->file('attachments');
@@ -135,7 +149,7 @@ class ChatController extends Controller
             $message = Message::create([
                 'chat_id' => $chat->id,
                 'sender_type' => $request->sender_type,
-                'message' => ($request->message !== null && $request->message !== '') ? $request->message : $chat_message,
+                'message' => is_array($chat_message) ? json_encode($chat_message) : $chat_message,
                 'message_type' => $request->message_type,
                 'attachments' => $filePath,
             ]);
@@ -212,8 +226,15 @@ class ChatController extends Controller
         if (!$disk->exists($message->attachments)) {
             abort(404);
         }
+        $path = $disk->path($message->attachments);
+        $ext = strtolower((string) pathinfo($message->attachments, PATHINFO_EXTENSION));
+        if (in_array($ext, ['html', 'htm'], true)) {
+            return response()->file($path, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+            ]);
+        }
 
-        return response()->file($disk->path($message->attachments));
+        return response()->file($path);
     }
 
     public function downloadAttachment(Request $request, Message $message)

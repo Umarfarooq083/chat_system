@@ -53,6 +53,11 @@ class Chat extends Model
         return $this->hasMany(ChatExternalApiFetch::class);
     }
 
+    public function feedbacks()
+    {
+        return $this->hasMany(ChatFeedback::class);
+    }
+
     public function latestMessage()
     {
         return $this->hasOne(Message::class)->latestOfMany();
