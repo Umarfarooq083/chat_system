@@ -24,11 +24,16 @@ class AgentController extends Controller
         }
     }
 
+    public function dashboard()
+    {
+        return Inertia::render('Dashboard');
+    }
     public function cnicLookup(Request $request)
     {
         $validated = $request->validate([
             'cnic' => ['required', 'string', 'max:32'],
         ]);
+
         $digits = (string) $validated['cnic'];
         if (strlen((string) $digits) !== 15) {
             return response()->json([
@@ -36,42 +41,33 @@ class AgentController extends Controller
             ], 422);
         }
     
-        $apiUrl = trim((string) env('CNIC_LOOKUP_API_URL', ''));
-        if ($apiUrl !== '') {
-            try {
-                $method = strtoupper(trim((string) env('CNIC_LOOKUP_API_METHOD', 'GET'))) ?: 'GET';
-                $token = trim((string) env('CNIC_LOOKUP_API_TOKEN', ''));
+        try {
+        $response = Http::withHeaders([
+            'token' => env('LEDGER_API_TOKEN'),
+        ])->get(env('CNIC_LOOKUP_API_URL'), [
+            'cnic' => $validated['cnic'],
+        ]);
+        $jsonResponse = $response->json();
+    
+        if ($response->failed()) {
+            return response()->json([
+                'message' => 'CNIC lookup API failed.',
+                'status' => $response->status(),
+                'details' => Str::limit((string) $response->body(), 2000),
+            ], 502);
+        }
 
-                $client = Http::acceptJson()->timeout(30);
-                if ($token !== '') {
-                    $client = $client->withToken($token);
-                }
+        return response()->json([
+            'cnic' => $digits,
+            'digits' => $digits,
+            'data' => $jsonResponse,
+        ]);
+        } catch (\Throwable $e) {
+            report($e);
 
-                $response = $method === 'POST'
-                    ? $client->post($apiUrl, ['cnic' => $digits])
-                    : $client->get($apiUrl, ['cnic' => $digits]);
-
-                if ($response->failed()) {
-                    return response()->json([
-                        'message' => 'CNIC lookup API failed.',
-                        'status' => $response->status(),
-                        'details' => Str::limit((string) $response->body(), 2000),
-                    ], 502);
-                }
-
-                return response()->json([
-                    'source' => 'api',
-                    'cnic' => $digits,
-                    'digits' => $digits,
-                    'data' => $response->json(),
-                ]);
-            } catch (\Throwable $e) {
-                report($e);
-
-                return response()->json([
-                    'message' => 'CNIC lookup failed.',
-                ], 500);
-            }
+            return response()->json([
+                'message' => 'CNIC lookup failed.',
+            ], 500);
         }
 
         return response()->json([
@@ -370,7 +366,7 @@ class AgentController extends Controller
             $response = Http::withHeaders([
                 'token' => env('LEDGER_API_TOKEN'),
             ])
-            ->timeout(320)
+            ->timeout(920)
             ->get(env('LEDGER_API_URL'), [
                 'file' => $registrationNo
             ]);

@@ -94,6 +94,7 @@ const submitCnicLookup = async () => {
   try {
     const response = await axios.post('/agent/cnic/lookup', { cnic: cnicInput.value })
     cnicResult.value = response?.data ?? null
+    cnicInput.value = null
   } catch (e) {
     cnicError.value = extractErrorMessage(e) || 'Failed to lookup CNIC.'
   } finally {
@@ -733,8 +734,21 @@ const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_dow
         </div>
 
         <div v-if="cnicResult" class="mt-4">
-          <div class="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Result</div>
-          <pre class="text-xs bg-slate-50 border border-slate-200 rounded-lg p-3 overflow-auto max-h-72">{{ JSON.stringify(cnicResult, null, 2) }}</pre>
+          <table class="w-full text-left text-sm text-gray-600 mb-4">
+            <thead>
+              <tr>
+                <th class="py-1 px-2 font-medium text-slate-700">CNIC No : {{ cnicResult?.cnic }}</th> 
+              </tr>
+              <tr>
+                <th class="py-1 px-2 font-medium text-slate-700">Registration No:</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="py-1 px-2" v-for="value in cnicResult?.data?.data?.files" :key="value">{{ value?.reg_no }}</td>
+              </tr>
+            </tbody>
+            </table>
         </div>
 
         <div class="mt-6 flex justify-end gap-2">
