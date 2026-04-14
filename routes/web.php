@@ -16,9 +16,8 @@ Route::get('/', function () {
     ]);
 });
 
-Route::get('/dashboard', function () {
-    return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+// Route::get('/dashboard', function () { return Inertia::render('Dashboard'); })->middleware(['auth', 'verified'])->name('dashboard');
+Route::get('/dashboard', [AgentController::class, 'dashboard'])->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -52,6 +51,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agent/chats/{chat}/feedbacks', [AgentController::class, 'storeFeedback'])->name('agent.chat.feedbacks.store');
     Route::post('/agent/chats/{chat}/read', [AgentController::class, 'markRead'])->name('agent.chat.read');
     Route::post('/agent/chats/{chat}/close', [AgentController::class, 'close'])->name('agent.chat.close');
+    Route::post('/agent/cnic/lookup', [AgentController::class, 'cnicLookup'])->name('agent.cnic.lookup');
     Route::post('/agent/chats/{chat}/external/fetch', [AgentController::class, 'fetchExternalData'])->name('agent.chat.external.fetch');
     Route::post('/agent/chats/{chat}/external/send-html', [AgentController::class, 'sendExternalHtml'])->name('agent.chat.external.sendHtml');
     Route::post('/agent/chats/{chat}/external/send-pdf', [AgentController::class, 'sendExternalPdf'])->name('agent.chat.external.sendPdf');

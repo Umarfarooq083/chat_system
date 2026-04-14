@@ -11,7 +11,7 @@ class RegistrationApiClient
     {
         $url = config('chat.registration_api_url');
         if (!$url) {
-            throw new \RuntimeException('Registration API URL is not configured (CHAT_REGISTRATION_API_URL).');
+            throw new \RuntimeException('Registration API URL is not configured (LEDGER_API_URL).');
         }
 
         $method = strtoupper((string) config('chat.registration_api_method', 'POST'));

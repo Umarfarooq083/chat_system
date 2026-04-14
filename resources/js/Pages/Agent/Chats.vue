@@ -2,6 +2,12 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 import { ref, onMounted, onBeforeUnmount, watch,computed } from 'vue'
 import axios from 'axios'
+import Modal from '@/Components/Modal.vue'
+import PrimaryButton from '@/Components/PrimaryButton.vue'
+import SecondaryButton from '@/Components/SecondaryButton.vue'
+import TextInput from '@/Components/TextInput.vue'
+import InputLabel from '@/Components/InputLabel.vue'
+import InputError from '@/Components/InputError.vue'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
 import { beep, setupAudioUnlock } from '../../utils/beep'
 
@@ -36,7 +42,6 @@ let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
-// Chat feedback state
 const feedbacks = ref([])
 const inquiries = ref([])
 const feedbackLoading = ref(false)
@@ -50,12 +55,53 @@ const feedbackForm = ref({
 })
 const feedbackError = ref('')
 const selectedInquiries = ref({});
-// File attachment state
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const isDraggingOver = ref(false)
 
-// update online status based on last_activity timestamp (60s threshold)
+const cnicModalOpen = ref(false)
+const cnicInput = ref('')
+const cnicSubmitting = ref(false)
+const cnicResult = ref(null)
+const cnicError = ref('')
+
+const openCnicModal = () => {
+  cnicModalOpen.value = true
+  cnicInput.value = ''
+  cnicSubmitting.value = false
+  cnicResult.value = null
+  cnicError.value = ''
+}
+
+const closeCnicModal = () => {
+  cnicModalOpen.value = false
+  cnicSubmitting.value = false
+  cnicError.value = ''
+}
+
+const submitCnicLookup = async () => {
+  cnicError.value = ''
+  cnicResult.value = null
+
+  const digits = (cnicInput.value || '').toString().replace(/\\D+/g, '')
+  console.log(digits.length)
+  if (digits.length !== 15) {
+    cnicError.value = 'CNIC must be 13 digits (e.g. 11111-1111111-1).'
+    return
+  }
+
+  cnicSubmitting.value = true
+  try {
+    const response = await axios.post('/agent/cnic/lookup', { cnic: cnicInput.value })
+    cnicResult.value = response?.data ?? null
+    cnicInput.value = null
+  } catch (e) {
+    cnicError.value = extractErrorMessage(e) || 'Failed to lookup CNIC.'
+  } finally {
+    cnicSubmitting.value = false
+  }
+}
+
 const updateOnlineFlags = () => {
   const cutoff = Date.now() - 30 * 1000;
   chats.value.forEach(c => {
@@ -113,7 +159,6 @@ watch(() => props.chats, (newChats) => {
 // }
 
 
-// Select a chat
 const selectChat = async (chat) => {
   selectedChat.value = chat
   messages.value = []
@@ -234,19 +279,6 @@ const mergeChatIntoList = (updated) => {
   if (selectedChat.value?.id === updated.id) Object.assign(selectedChat.value, updated)
 }
 
-const fetchExternalData = async (chat) => {
-  if (!chat?.id) return
-  externalFetching.value = true
-  try {
-    const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`)
-    if (response.data?.chat) mergeChatIntoList(response.data.chat)
-  } catch (e) {
-    sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')
-  } finally {
-    externalFetching.value = false
-  }
-}
-
 const sendExternalPdf = async (chat, registrationNo = null) => {
   if (!chat?.id) return
   externalPdfSending.value = true
@@ -311,20 +343,10 @@ const fetchExternalDataForMessage = async (chat, msg) => {
   }
 }
 
-const sendExternalPdfForMessage = async (chat, msg) => {
-  const registrationNo = registrationNoForUserInfoMessage(msg)
-  return sendExternalPdf(chat, registrationNo)
-}
 
 const sendExternalHtmlForMessage = async (chat, msg) => {
   const registrationNo = registrationNoForUserInfoMessage(msg)
   return sendExternalHtml(chat, registrationNo)
-}
-
-const canSendPdfForMessage = (chat, msg) => {
-  const msgReg = (registrationNoForUserInfoMessage(msg) || '').toString().trim()
-  const chatReg = (chat?.registration_no || '').toString().trim()
-  return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
 }
 
 const canSendHtmlForMessage = (chat, msg) => {
@@ -370,7 +392,6 @@ const clearAttachments = () => {
   attachedFiles.value = []
 }
 
-// Drag-and-drop on the reply area
 const onDragOver = (e) => {
   e.preventDefault()
   isDraggingOver.value = true
@@ -383,7 +404,6 @@ const onDrop = (e) => {
   isDraggingOver.value = false
   addFiles(Array.from(e.dataTransfer.files || []))
 }
-
 
 const getFileIcon = (file) => {
   const ext = file.name.split('.').pop().toLowerCase()
@@ -431,9 +451,6 @@ const sendReply = async () => {
   }
 }
 
-// ── Existing methods ─────────────────────────────────────────────────────────
-
-// Delete chat
 const deleteChat = async (chat, event) => {
   event.stopPropagation()
   if (confirm('Are you sure you want to delete this chat?')) {
@@ -448,7 +465,6 @@ const deleteChat = async (chat, event) => {
   }
 }
 
-// Show user info form
 const showUserInfoForm = async (chat, event) => {
   if (event?.stopPropagation) event.stopPropagation()
   if (selectedChat.value?.id !== chat?.id) {
@@ -672,7 +688,7 @@ const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_dow
 
 <template>
   <AuthenticatedLayout>
-    <!-- <template #header>
+    <template #header>
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600 text-white">
@@ -682,14 +698,72 @@ const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_dow
           </div>
           <h2 class="text-base font-bold text-gray-900 tracking-tight">Agent Dashboard</h2>
         </div>
-        <div
-          class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 uppercase tracking-widest">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          Live
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+            @click="openCnicModal"
+          >
+            CNIC Lookup
+          </button>
+
+          <div
+            class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 uppercase tracking-widest">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Live
+          </div>
         </div>
       </div>
-    </template> -->
-    <!-- WORKSPACE -->
+    </template>
+
+    <Modal :show="cnicModalOpen" @close="closeCnicModal">
+      <div class="p-6">
+        <h2 class="text-lg font-medium text-gray-900">CNIC Lookup</h2>
+        
+        <div class="mt-6">
+          <InputLabel for="cnic" value="CNIC" />
+          <TextInput
+            id="cnic"
+            v-model="cnicInput"
+            type="text"
+            class="mt-1 block w-full"
+            placeholder="11111-111111-1"
+            @keyup.enter="submitCnicLookup"
+          />
+          <InputError :message="cnicError" class="mt-2" />
+        </div>
+
+        <div v-if="cnicResult" class="mt-4">
+          <table class="w-full text-left text-sm text-gray-600 mb-4">
+            <thead>
+              <tr>
+                <th class="py-1 px-2 font-medium text-slate-700">CNIC No : {{ cnicResult?.cnic }}</th> 
+              </tr>
+              <tr>
+                <th class="py-1 px-2 font-medium text-slate-700">Registration No:</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="py-1 px-2" v-for="value in cnicResult?.data?.data?.files" :key="value">{{ value?.reg_no }}</td>
+              </tr>
+            </tbody>
+            </table>
+        </div>
+
+        <div class="mt-6 flex justify-end gap-2">
+          <SecondaryButton type="button" @click="closeCnicModal">Close</SecondaryButton>
+          <PrimaryButton
+            type="button"
+            :class="{ 'opacity-25': cnicSubmitting }"
+            :disabled="cnicSubmitting"
+            @click="submitCnicLookup"
+          >
+            {{ cnicSubmitting ? 'Submitting...' : 'Submit' }}
+          </PrimaryButton>
+        </div>
+      </div>
+    </Modal>
 
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
       style="height: calc(100vh - 85px);">
@@ -998,7 +1072,7 @@ const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_dow
                     </div>
                   </div>
                   <div class="text-sm text-slate-700 whitespace-pre-line mt-1">
-                    {{ fb.inquiry_name }} | <strong>Reg: {{ fb.registration }}</strong>
+                    {{ fb.inquiry_name }} | <strong>Reg: {{ fb.registration ?? 'N/A' }}</strong>
                   </div>
                 </div>
 
@@ -1044,13 +1118,6 @@ const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_dow
                     {{ externalFetching ? 'Fetching...' : 'Fetch Data' }}
                   </button>
                  
-                  <!-- <button v-if="canSendPdfForMessage(selectedChat, msg)"
-                    type="button" @click="sendExternalPdfForMessage(selectedChat, msg)"
-                    class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                    :disabled="externalPdfSending">
-                    {{ externalPdfSending ? 'Sending...' : 'Send PDF' }}
-                  </button> -->
-
                   <button v-if="canSendHtmlForMessage(selectedChat, msg)"
                     type="button" @click="sendExternalHtmlForMessage(selectedChat, msg)"
                     class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
