@@ -472,7 +472,7 @@ const showUserInfoForm = async (chat, event) => {
   }
   const formData = {
     chat_id: chat.id,
-    message: 'Please provide your information: Phone No (required), Customer Name (required), Registration No (required). Email is optional.',
+    message: 'Please provide your information:',
     sender_type: 'agent',
     message_type: 'user_info_request'
   }

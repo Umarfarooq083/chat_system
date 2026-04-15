@@ -36,6 +36,8 @@
     </div>
 </div>
 
+<script src="https://js.pusher.com/8.4/pusher.min.js"></script>
+
 <script>
 (() => {
     const title = @json($title);
@@ -61,7 +63,9 @@
 
     let chatId = null;
     let lastId = 0;
-    let pollTimer = null;
+    let pusher = null;
+    let channelSubscription = null;
+    let renderedMessageIds = new Set();
 
     function formatMessageBody(value) {
         if (value === null || value === undefined) return '';
@@ -69,30 +73,40 @@
         try { return JSON.stringify(value, null, 2); } catch { return String(value); }
     }
 
-    function renderMessage(m) {
+    function renderMessage(latestMessage) {
+        // Prevent duplicate messages
+        if (latestMessage.id && renderedMessageIds.has(latestMessage.id)) {
+            return;
+        }
+        
         const div = document.createElement('div');
-        div.className = 'msg ' + (m.sender_type === 'visitor' ? 'visitor' : 'agent');
+        div.className = 'msg ' + (latestMessage.sender_type === 'visitor' ? 'visitor' : 'agent');
         const body = document.createElement('div');
-        body.textContent = formatMessageBody(m.message);
-        div.appendChild(body);
-        if (m.attachment_download_url) {
+        body.textContent = formatMessageBody(latestMessage.message);
+        div.appendChild(body);  
+        if (latestMessage.attachment_download_url) {
             const a = document.createElement('a');
-            a.href = m.attachment_download_url;
-            a.textContent = m.attachment_name ? ('Download: ' + m.attachment_name) : 'Download attachment';
+            a.href = latestMessage.attachment_download_url;
+            a.textContent = latestMessage.attachment_name ? ('Download: ' + latestMessage.attachment_name) : 'Download attachment';
             a.target = '_blank';
             a.rel = 'noreferrer';
             a.style.display = 'block';
             a.style.marginTop = '6px';
-            a.style.color = (m.sender_type === 'visitor') ? '#fff' : '#2563eb';
+            a.style.color = (latestMessage.sender_type === 'visitor') ? '#fff' : '#2563eb';
             div.appendChild(a);
         }
-        if (m.created_at) {
+        if (latestMessage.created_at) {
             const meta = document.createElement('div');
             meta.className = 'meta';
-            meta.textContent = new Date(m.created_at).toLocaleString();
+            meta.textContent = new Date(latestMessage.created_at).toLocaleString();
             div.appendChild(meta);
         }
         messagesEl.appendChild(div);
+        
+        // Track rendered message ID
+        if (latestMessage.id) {
+            renderedMessageIds.add(latestMessage.id);
+        }
     }
 
     function scrollToBottom() {
@@ -112,40 +126,62 @@
         return res.json();
     }
 
-    async function init() {
-        messagesEl.innerHTML = '<div class="hint">Connecting…</div>';
-        const data = await postJson(`${apiBase}/chat`, {
-            visitor_id: visitorId,
-            current_url: document.referrer || null,
-            referrer_url: document.referrer || null,
+    function initPusher() {
+        if (pusher) return;
+        
+        Pusher.logToConsole = false;
+        
+        pusher = new Pusher(@json(env('PUSHER_APP_KEY')), {
+            cluster: @json(env('PUSHER_APP_CLUSTER')),
+            encrypted: true,
+            forceTLS: true
         });
-        chatId = data.chat.id;
-        messagesEl.innerHTML = '';
-        (data.messages || []).forEach(m => {
-            renderMessage(m);
-            lastId = Math.max(lastId, Number(m.id || 0));
-        });
-        scrollToBottom();
-        pollTimer = setInterval(poll, 2500);
     }
 
-    async function poll() {
-        if (!chatId) return;
-        const url = new URL(`${location.origin}${apiBase}/messages`);
-        url.searchParams.set('visitor_id', visitorId);
-        url.searchParams.set('chat_id', chatId);
-        url.searchParams.set('after_id', String(lastId || 0));
-        url.searchParams.set('limit', '50');
-        const res = await fetch(url.toString(), { method: 'GET' });
-        if (!res.ok) return;
-        const data = await res.json();
-        const msgs = data.messages || [];
-        if (!msgs.length) return;
-        msgs.forEach(m => {
-            renderMessage(m);
-            lastId = Math.max(lastId, Number(m.id || 0));
+    function subscribeToChatChannel(cId) {
+        if (!pusher || !cId) return;
+        
+        // Unsubscribe from previous channel if exists
+        if (channelSubscription) {
+            pusher.unsubscribe('chat.' + channelSubscription);
+        }
+        
+        channelSubscription = cId;
+        const channel = pusher.subscribe('chat.' + cId);
+        
+        channel.bind('App\\Events\\MessageSent', function(data) {
+            const message = data.message;
+            if (message && Number(message.id || 0) > lastId) {
+                renderMessage(message);
+                lastId = Math.max(lastId, Number(message.id || 0));
+                scrollToBottom();
+            }
         });
-        scrollToBottom();
+    }
+
+    async function init() {
+        messagesEl.innerHTML = '<div class="hint">Connecting…</div>';
+        try {
+            const data = await postJson(`${apiBase}/chat`, {
+                visitor_id: visitorId,
+                current_url: document.referrer || null,
+                referrer_url: document.referrer || null,
+            });
+            chatId = data.chat.id;
+            messagesEl.innerHTML = '';
+            renderedMessageIds.clear(); // Clear previous message IDs
+            (data.messages || []).forEach(m => {
+                renderMessage(m);
+                lastId = Math.max(lastId, Number(m.id || 0));
+            });
+            scrollToBottom();
+            
+            // Initialize Pusher and subscribe to chat channel
+            initPusher();
+            subscribeToChatChannel(chatId);
+        } catch (error) {
+            messagesEl.innerHTML = `<div class="hint">Failed to connect. Please refresh.<br>${String(error.message || error)}</div>`;
+        }
     }
 
     async function send() {
