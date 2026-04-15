@@ -18,6 +18,30 @@ Notes:
 - RoadRunner binary files (`rr`, `rr.exe`, `.rr.yaml`) are ignored by git. If you deploy Octane, run `php artisan octane:install --server=roadrunner` on the server.
 - On Windows, if you end up with `rr.exe` only, create the expected `rr` file via `Copy-Item .\\rr.exe .\\rr -Force`.
 
+## Embeddable Chat Widget
+
+Add this snippet to any website where you want the floating chat button:
+
+```html
+<script
+  src="https://YOUR-CHAT-DOMAIN.COM/chat-widget/embed.js"
+  data-chat-url="https://YOUR-CHAT-DOMAIN.COM"
+  data-position="right"
+  data-title="Support"
+  data-color="#111827"
+></script>
+```
+
+Replace `YOUR-CHAT-DOMAIN.COM` with the domain where this Laravel app is hosted (the script is served from `public/chat-widget/embed.js`).
+
+Widget URLs:
+- Widget page: `https://YOUR-CHAT-DOMAIN.COM/chat-widget`
+- Widget script: `https://YOUR-CHAT-DOMAIN.COM/chat-widget/embed.js`
+
+Optional `.env` defaults (used if `data-title` / `data-color` aren’t set):
+- `CHAT_WIDGET_TITLE="Chat"`
+- `CHAT_WIDGET_BRAND_COLOR="#111827"`
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

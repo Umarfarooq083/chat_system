@@ -5,6 +5,10 @@ return [
     // set this in your .env as CHAT_API_TOKEN
     'api_token' => env('CHAT_API_TOKEN'),
 
+    // Widget defaults (used by /chat-widget and public/chat-widget/embed.js)
+    'widget_title' => env('CHAT_WIDGET_TITLE', 'Chat'),
+    'widget_brand_color' => env('CHAT_WIDGET_BRAND_COLOR', '#111827'),
+
     // Third-party registration API (used by agent UI)
     // Given cURL example:
     // GET http://webtointr.bwcapp.net/api/chatbwc/ledger?file=34324&test=12
