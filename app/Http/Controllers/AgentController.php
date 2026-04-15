@@ -66,7 +66,7 @@ class AgentController extends Controller
             report($e);
 
             return response()->json([
-                'message' => 'CNIC lookup failed.',
+                'message' => 'CNIC lookup failed.' . $e->getMessage(),
             ], 500);
         }
 
