@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ChatWidgetController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -41,6 +42,8 @@ Route::post('/send-message', [ChatController::class, 'sendMessage']);
 Route::post('/chat/ping', [ChatController::class, 'ping']);
 Route::get('/attachments/{message}/view', [ChatController::class, 'viewAttachment'])->name('attachments.view');
 Route::get('/attachments/{message}/download', [ChatController::class, 'downloadAttachment'])->name('attachments.download');
+
+Route::get('/chat-widget', [ChatWidgetController::class, 'page'])->name('chat-widget.page');
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats', [AgentController::class, 'index'])->name('agent.chats');
