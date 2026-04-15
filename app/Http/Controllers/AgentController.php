@@ -44,7 +44,9 @@ class AgentController extends Controller
         try {
         $response = Http::withHeaders([
             'token' => env('LEDGER_API_TOKEN'),
-        ])->get(env('CNIC_LOOKUP_API_URL'), [
+        ])
+        ->timeout(920)
+        ->get(env('CNIC_LOOKUP_API_URL'), [
             'cnic' => $validated['cnic'],
         ]);
         $jsonResponse = $response->json();
