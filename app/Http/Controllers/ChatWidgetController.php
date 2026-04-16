@@ -7,6 +7,8 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Message;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class ChatWidgetController extends Controller
 {
@@ -89,7 +91,13 @@ class ChatWidgetController extends Controller
         $validated = $request->validate([
             'visitor_id' => 'required|string|max:100',
             'chat_id' => 'required|integer|exists:chats,id',
-            'message' => 'required|string|max:4000',
+            'message' => 'required_without:attachments|nullable|string|max:4000',
+            'message_type' => 'nullable|string',
+            'attachments' => 'nullable|file|max:20480',
+            'phone' => 'nullable|string|max:50',
+            'customer_name' => 'nullable|string|max:255',
+            'registration_no' => 'nullable|string|max:100',
+            'email' => 'nullable|string|max:255',
             'current_url' => 'nullable|string|max:2048',
             'referrer_url' => 'nullable|string|max:2048',
         ]);
@@ -103,17 +111,70 @@ class ChatWidgetController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $messageText = trim($validated['message']);
-        if ($messageText === '') {
-            return response()->json(['message' => 'Message is required'], 422);
+        // Apply user info if it's a user_info_response
+        if ($request->input('message_type') === 'user_info_response' && $request->input('sender_type') === 'visitor') {
+            $phone = $request->input('phone');
+            $customerName = $request->input('customer_name');
+            $registrationNo = $request->input('registration_no');
+            $email = $request->input('email');
+
+            $phone = is_string($phone) ? trim($phone) : null;
+            $customerName = is_string($customerName) ? trim($customerName) : null;
+            $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+            $email = is_string($email) ? trim($email) : null;
+            if ($email === '') $email = null;
+
+            if ($phone && $customerName && $registrationNo) {
+                $chat->phone = $phone;
+                $chat->customer_name = $customerName;
+                $chat->registration_no = $registrationNo;
+                $chat->email = $email;
+                $chat->user_info_submitted_at = now();
+            }
+        }
+
+        $messageText = trim($validated['message'] ?? '');
+        if ($messageText === '' && !$request->hasFile('attachments')) {
+            return response()->json(['message' => 'Message or attachment is required'], 422);
+        }
+
+        $filePath = null;
+        if ($request->hasFile('attachments')) {
+            $uploaded = $request->file('attachments');
+            if (is_array($uploaded)) {
+                $uploaded = $uploaded[0] ?? null;
+            }
+
+            if ($uploaded) {
+                $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
+                $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
+
+                $fileName = (string) Str::uuid() . '.' . $ext;
+                $dir = 'chat-attachments/' . $chat->id;
+                $filePath = $uploaded->storeAs($dir, $fileName, 'public');
+            }
+        }
+
+        $chat_message = [];
+
+        if ($request->message_type == 'user_info_response') {
+            $chat_message = [
+                'type' => 'user_info_response',
+                'name' => $request->customer_name,
+                'email' => $request->email,
+                'phone' => $request->phone,
+                'registration_no' => $request->registration_no,
+            ];
+        } else {
+            $chat_message = $messageText;
         }
 
         $message = Message::create([
             'chat_id' => $chat->id,
             'sender_type' => 'visitor',
-            'message' => $messageText,
-            'message_type' => null,
-            'attachments' => null,
+            'message' => is_array($chat_message) ? json_encode($chat_message) : $chat_message,
+            'message_type' => $validated['message_type'] ?? null,
+            'attachments' => $filePath,
         ]);
 
         $chat->last_message_at = $message->created_at;
@@ -183,5 +244,43 @@ class ChatWidgetController extends Controller
             'attachment_name' => $message->attachment_name,
             'attachment_is_image' => $message->attachment_is_image,
         ];
+    }
+
+    public function ping(Request $request)
+    {
+        $validated = $request->validate([
+            'visitor_id' => 'required|string|max:100',
+            'chat_id' => 'required|integer|exists:chats,id',
+            'current_url' => 'nullable|string|max:2048',
+        ]);
+
+        if (preg_match(self::VISITOR_ID_PATTERN, (string) $validated['visitor_id']) !== 1) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        if ((string) $chat->visitor_id !== (string) $validated['visitor_id']) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $updates = [
+            'last_activity' => now(),
+            'ip' => DB::raw("COALESCE(ip, '{$request->ip()}')"),
+        ];
+
+        if (!empty($validated['current_url'])) {
+            $updates['current_url'] = $validated['current_url'];
+        }
+
+        Chat::where('id', $validated['chat_id'])->update($updates);
+        $chat = Chat::find($validated['chat_id']);
+        
+        try {
+            broadcast(new \App\Events\ChatPing($chat));
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return response()->json(['status' => 'ok']);
     }
 }

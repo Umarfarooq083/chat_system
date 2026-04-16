@@ -12,7 +12,7 @@
         .title { font-size: 14px; font-weight: 600; }
         .btn { border: 0; background: rgba(255,255,255,.15); color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
         .body { flex: 1; overflow: auto; padding: 12px; background: #f9fafb; }
-        .msg { max-width: 85%; padding: 10px 12px; border-radius: 12px; margin: 6px 0; font-size: 13px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
+        .msg { max-width: 85%; padding: 10px 12px; border-radius: 12px; margin: 6px 0; font-size: 13px; line-height: 1.35; word-break: break-word; }
         .msg.visitor { margin-left: auto; background:  rgb(17 101 226); color: #fff; border-bottom-right-radius: 4px; }
         .msg.agent { margin-right: auto; background: #fff; color: #111827; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
         .meta { font-size: 11px; opacity: .75; margin-top: 4px; }
@@ -20,7 +20,19 @@
         .input { flex: 1; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 12px; font-size: 13px; outline: none; }
         .send { border: 0; border-radius: 10px; padding: 10px 14px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
         .send:disabled { opacity: .6; cursor: not-allowed; }
+        .attach-btn { border: 1px solid #d1d5db; border-radius: 20px; padding: 7px 13px 7px 14px; background: #fff; cursor: pointer; font-size: 14px; }
         .hint { padding: 10px 12px; color: #6b7280; font-size: 12px; }
+        .info-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #eff6ff; }
+        .info-form.show { display: block; }
+        .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .form-input { flex: 1; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; font-size: 13px; outline: none; }
+        .form-input:focus { border-color: var(--brand); }
+        .form-btn { border: 0; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .form-btn.primary { background: var(--brand); color: #fff; }
+        .form-btn.secondary { background: #6b7280; color: #fff; }
+        .attachment { display: flex; align-items: center; gap: 8px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; margin: 8px; margin-bottom: 0; }
+        .attachment img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
+        .attachment .remove { cursor: pointer; color: #ef4444; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -30,9 +42,26 @@
         <button class="btn" id="closeBtn" type="button">-</button>
     </div>
     <div class="body" id="messages"></div>
+    <div class="info-form" id="infoForm">
+        <div class="hint" style="color: #1e40af; font-weight: 600;">Please provide your information:</div>
+        <div class="form-row">
+            <input class="form-input" id="phone" type="tel" placeholder="Phone No" required>
+            <input class="form-input" id="customerName" type="text" placeholder="Customer Name" required>
+        </div>
+        <div class="form-row">
+            <input class="form-input" id="registrationNo" type="text" placeholder="Registration No" required>
+            <input class="form-input" id="email" type="email" placeholder="Email">
+        </div>
+        <div class="form-row" style="justify-content: flex-end; gap: 8px;">
+            <button class="form-btn secondary" id="cancelInfo" type="button">Cancel</button>
+            <button class="form-btn primary" id="submitInfo" type="button">Submit</button>
+        </div>
+    </div>
     <div class="composer">
         <input class="input" id="text" placeholder="Type a message…" autocomplete="off">
-        <button class="send" id="sendBtn" type="button">Send</button>
+        <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
+        <button class="attach-btn" id="attachBtn" type="button" title="Attach file">📎</button>
+        <button class="send" id="sendBtn" type="button" disabled>Send</button>
     </div>
 </div>
 
@@ -46,6 +75,15 @@
     const messagesEl = document.getElementById('messages');
     const textEl = document.getElementById('text');
     const sendBtn = document.getElementById('sendBtn');
+    const attachBtn = document.getElementById('attachBtn');
+    const fileInput = document.getElementById('fileInput');
+    const infoFormEl = document.getElementById('infoForm');
+    const phoneEl = document.getElementById('phone');
+    const customerNameEl = document.getElementById('customerName');
+    const registrationNoEl = document.getElementById('registrationNo');
+    const emailEl = document.getElementById('email');
+    const submitInfoBtn = document.getElementById('submitInfo');
+    const cancelInfoBtn = document.getElementById('cancelInfo');
 
     function uuid() {
         if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -66,6 +104,10 @@
     let pusher = null;
     let channelSubscription = null;
     let renderedMessageIds = new Set();
+    let showUserForm = false;
+    let attachedFile = null;
+    let lastSentUrl = null;
+    let urlTrackingSetup = false;
 
     function formatMessageBody(value) {
         if (value === null || value === undefined) return '';
@@ -82,7 +124,24 @@
         const div = document.createElement('div');
         div.className = 'msg ' + (latestMessage.sender_type === 'visitor' ? 'visitor' : 'agent');
         const body = document.createElement('div');
-        body.textContent = formatMessageBody(latestMessage.message);
+        
+        if (latestMessage.message_type === 'user_info_response') {
+            try {
+                const info = typeof latestMessage.message === 'string' ? JSON.parse(latestMessage.message) : latestMessage.message;
+                body.innerHTML = `
+                    <div style="font-weight: 600; margin-bottom: 4px;">User Information Sent:</div>
+                    <div>Name: ${info.name || ''}</div>
+                    <div>Email: ${info.email || ''}</div>
+                    <div>Phone: ${info.phone || ''}</div>
+                    <div>Reg No: ${info.registration_no || ''}</div>
+                `;
+            } catch (e) {
+                body.textContent = formatMessageBody(latestMessage.message);
+            }
+        } else {
+            body.textContent = formatMessageBody(latestMessage.message);
+        }
+        
         div.appendChild(body);  
         if (latestMessage.attachment_download_url) {
             const a = document.createElement('a');
@@ -94,7 +153,8 @@
             a.style.marginTop = '6px';
             a.style.color = (latestMessage.sender_type === 'visitor') ? '#fff' : '#2563eb';
             div.appendChild(a);
-        }
+        }  
+        
         if (latestMessage.created_at) {
             const meta = document.createElement('div');
             meta.className = 'meta';
@@ -106,6 +166,14 @@
         // Track rendered message ID
         if (latestMessage.id) {
             renderedMessageIds.add(latestMessage.id);
+        }
+    }
+
+    function updateFormVisibility() {
+        if (showUserForm) {
+            infoFormEl.classList.add('show');
+        } else {
+            infoFormEl.classList.remove('show');
         }
     }
 
@@ -154,6 +222,13 @@
             if (message && Number(message.id || 0) > lastId) {
                 renderMessage(message);
                 lastId = Math.max(lastId, Number(message.id || 0));
+                if (message.message_type === 'user_info_request') {
+                    showUserForm = true;
+                }
+                if (message.message_type === 'user_info_response' && message.sender_type === 'visitor') {
+                    showUserForm = false;
+                }
+                updateFormVisibility();
                 scrollToBottom();
             }
         });
@@ -162,20 +237,40 @@
     async function init() {
         messagesEl.innerHTML = '<div class="hint">Connecting…</div>';
         try {
-            const data = await postJson(`${apiBase}/chat`, {
-                visitor_id: visitorId,
-                current_url: document.referrer || null,
-                referrer_url: document.referrer || null,
+            const response = await fetch(`${apiBase}/chat`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    visitor_id: visitorId,
+                    current_url: document.referrer || null,
+                    referrer_url: document.referrer || null,
+                }),
             });
+            if (!response.ok) {
+                throw new Error(`Request failed (${response.status}): ${response.statusText}`);
+            }
+            const data = await response.json();
+
             chatId = data.chat.id;
             messagesEl.innerHTML = '';
             renderedMessageIds.clear(); // Clear previous message IDs
             (data.messages || []).forEach(m => {
                 renderMessage(m);
                 lastId = Math.max(lastId, Number(m.id || 0));
+                if (m.message_type === 'user_info_request') {
+                    showUserForm = true;
+                }
+                if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
+                    showUserForm = false;
+                }
             });
+            updateFormVisibility();
             scrollToBottom();
             
+            // initial ping to mark online
+            await pingChat(true);
+            setupUrlTracking();
+
             // Initialize Pusher and subscribe to chat channel
             initPusher();
             subscribeToChatChannel(chatId);
@@ -186,17 +281,31 @@
 
     async function send() {
         const msg = textEl.value.trim();
-        if (!msg || !chatId) return;
+        const hasText = msg !== '';
+        
+        const hasFile = attachedFile !== null;
+        if (!hasText && !hasFile) return;
         sendBtn.disabled = true;
         try {
-            const data = await postJson(`${apiBase}/message`, {
-                visitor_id: visitorId,
-                chat_id: chatId,
-                message: msg,
-                current_url: document.referrer || null,
-                referrer_url: document.referrer || null,
+            const formData = new FormData();
+            formData.append('visitor_id', visitorId);
+            formData.append('chat_id', chatId);
+            if (hasText) formData.append('message', msg);
+            if (hasFile) formData.append('attachments', attachedFile);
+            formData.append('current_url', document.referrer || null);
+            formData.append('referrer_url', document.referrer || null);
+
+            const response = await fetch(`${apiBase}/message`, {
+                method: 'POST',
+                body: formData,
             });
+            if (!response.ok) {
+                throw new Error(`Request failed (${response.status}): ${response.statusText}`);
+            }
+            const data = await response.json();
+
             textEl.value = '';
+            removeAttachment();
             // Optimistic render: API returns the created message
             if (data && data.message) {
                 renderMessage(data.message);
@@ -209,17 +318,195 @@
         }
     }
 
+    async function submitInfo() {
+        const phone = phoneEl.value.trim();
+        const customerName = customerNameEl.value.trim();
+        const registrationNo = registrationNoEl.value.trim();
+        const email = emailEl.value.trim();
+
+        if (!phone || !customerName || !registrationNo) {
+            alert('Please fill in the required fields (Phone No, Customer Name, Registration No).');
+            return;
+        }
+
+        submitInfoBtn.disabled = true;
+        try {
+            const formData = new FormData();
+            formData.append('visitor_id', visitorId);
+            formData.append('chat_id', chatId);
+            formData.append('message', `Phone No: ${phone}\nCustomer Name: ${customerName}\nRegistration No: ${registrationNo}\nEmail: ${email}`);
+            formData.append('message_type', 'user_info_response');
+            formData.append('phone', phone);
+            formData.append('customer_name', customerName);
+            formData.append('registration_no', registrationNo);
+            if (email) formData.append('email', email);
+            formData.append('current_url', document.referrer || null);
+            formData.append('referrer_url', document.referrer || null);
+
+            const response = await fetch(`${apiBase}/message`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) {
+                throw new Error(`Request failed (${response.status}): ${response.statusText}`);
+            }
+            const data = await response.json();
+
+            showUserForm = false;
+            updateFormVisibility();
+            // Clear form
+            phoneEl.value = '';
+            customerNameEl.value = '';
+            registrationNoEl.value = '';
+            emailEl.value = '';
+        } catch (error) {
+            alert('Failed to send info. Please try again.');
+        } finally {
+            submitInfoBtn.disabled = false;
+        }
+    }
+
+    function cancelInfo() {
+        showUserForm = false;
+        updateFormVisibility();
+        phoneEl.value = '';
+        customerNameEl.value = '';
+        registrationNoEl.value = '';
+        emailEl.value = '';
+    }
+
+    function setupUrlTracking() {
+        if (urlTrackingSetup) return;
+        urlTrackingSetup = true;
+
+        const notify = () => pingChat(true);
+        window.addEventListener('popstate', notify);
+        window.addEventListener('locationchange', notify);
+
+        const pushState = history.pushState;
+        if (typeof pushState === 'function') {
+            history.pushState = function (...args) {
+                pushState.apply(this, args);
+                window.dispatchEvent(new Event('locationchange'));
+            };
+        }
+
+        const replaceState = history.replaceState;
+        if (typeof replaceState === 'function') {
+            history.replaceState = function (...args) {
+                replaceState.apply(this, args);
+                window.dispatchEvent(new Event('locationchange'));
+            };
+        }
+    }
+
+    async function pingChat(force = false) {
+        if (!chatId) return;
+        try {
+            const currentUrl = window.location.href;
+            if (!force && lastSentUrl === currentUrl) {
+                await fetch(`${apiBase}/chat/ping`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ visitor_id: visitorId, chat_id: chatId }),
+                });
+                return;
+            }
+
+            lastSentUrl = currentUrl;
+            await fetch(`${apiBase}/chat/ping`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ visitor_id: visitorId, chat_id: chatId, current_url: currentUrl }),
+            });
+        } catch (err) {
+            console.error('Ping failed', err);
+        }
+    }
+
+    function updateSendButton() {
+        const hasText = textEl.value.trim() !== '';
+        const hasFile = attachedFile !== null;
+        sendBtn.disabled = !hasText && !hasFile;
+    }
+
     document.getElementById('closeBtn').addEventListener('click', () => {
         window.parent?.postMessage({ type: 'CHAT_WIDGET_CLOSE' }, '*');
     });
 
-    sendBtn.addEventListener('click', send);
-    textEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            send();
+    function removeAttachment() {
+        if (attachedFile && attachedFile.type.startsWith('image/')) {
+            URL.revokeObjectURL(attachedFile.previewUrl);
         }
+        attachedFile = null;
+        updateAttachmentDisplay();
+    }
+ function updateAttachmentDisplay() {
+        const existing = document.querySelector('.attachment');
+        if (existing) existing.remove();
+        
+        if (!attachedFile) {
+            updateSendButton();
+            return;
+        }
+        
+        const div = document.createElement('div');
+        div.className = 'attachment';
+        
+        if (attachedFile.type.startsWith('image/')) {
+            const img = document.createElement('img');
+            attachedFile.previewUrl = URL.createObjectURL(attachedFile);
+            img.src = attachedFile.previewUrl;
+            img.alt = attachedFile.name;
+            div.appendChild(img);
+        }
+        
+        const span = document.createElement('span');
+        span.textContent = attachedFile.name;
+        div.appendChild(span);
+        
+        const removeBtn = document.createElement('span');
+        removeBtn.className = 'remove';
+        removeBtn.textContent = '×';
+        removeBtn.onclick = removeAttachment;
+        div.appendChild(removeBtn);
+        
+        // Insert before the composer
+        const composer = document.querySelector('.composer');
+        composer.parentNode.insertBefore(div, composer);
+        updateSendButton();
+    }
+
+    attachBtn.addEventListener('click', () => {
+        fileInput.click();
     });
+
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (file.size > 20 * 1024 * 1024) {
+                alert('File too large. Maximum size is 20 MB.');
+                return;
+            }
+            attachedFile = file;
+            updateAttachmentDisplay();
+        }
+        e.target.value = '';
+    });
+
+    sendBtn.addEventListener('click', send);
+    submitInfoBtn.addEventListener('click', submitInfo);
+    cancelInfoBtn.addEventListener('click', cancelInfo);
+
+    textEl.addEventListener('input', updateSendButton);
+
+    // Initialize send button state
+    updateSendButton();
+
+    // periodic ping (also updates current URL)
+    setInterval(() => {
+        pingChat();
+    }, 20000);
 
     init().catch((e) => {
         messagesEl.innerHTML = `<div class="hint">Failed to connect. Please refresh.<br>${String(e.message || e)}</div>`;
