@@ -40,6 +40,7 @@ Route::get('/chat', [ChatController::class, 'visitorChat']);
 
 Route::post('/send-message', [ChatController::class, 'sendMessage']);
 Route::post('/chat/ping', [ChatController::class, 'ping']);
+Route::post('/chat/read', [ChatController::class, 'markVisitorRead']);
 Route::get('/attachments/{message}/view', [ChatController::class, 'viewAttachment'])->name('attachments.view');
 Route::get('/attachments/{message}/download', [ChatController::class, 'downloadAttachment'])->name('attachments.download');
 

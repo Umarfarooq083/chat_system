@@ -12,6 +12,10 @@ const fileInputRef = ref(null)
 const messageContainer = ref(null)
 const showUserForm = ref(false)
 const sendError = ref('')
+const chatReadState = ref({
+  agent_last_read_at: null,
+  visitor_last_read_at: null,
+})
 const userForm = ref({
   phone: '',
   customerName: '',
@@ -19,6 +23,7 @@ const userForm = ref({
   email: ''
 })
 let chatId = null
+let visitorId = null
 let lastSentUrl = null
 let urlTrackingSetup = false
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -73,6 +78,19 @@ const formatTime = (timestamp) => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+const toMillis = (value) => {
+  if (!value) return null
+  const ts = new Date(value).getTime()
+  return Number.isNaN(ts) ? null : ts
+}
+
+const isVisitorMessageReadByAgent = (msg) => {
+  if (!msg || msg.sender_type !== 'visitor') return false
+  const messageTs = toMillis(msg.created_at)
+  const agentReadTs = toMillis(chatReadState.value.agent_last_read_at)
+  return messageTs !== null && agentReadTs !== null && messageTs <= agentReadTs
+}
+
 const scrollToBottom = async () => {
   await nextTick()
   if (messageContainer.value) {
@@ -99,10 +117,14 @@ onMounted(async () => {
 
     const response = await axios.post(createUrl, { current_url: window.location.href }, { headers })
     chatId = response.data.chat.id
+    visitorId = response.data?.chat?.visitor_id || null
+    chatReadState.value.agent_last_read_at = response.data?.chat?.agent_last_read_at || null
+    chatReadState.value.visitor_last_read_at = response.data?.chat?.visitor_last_read_at || null
     messages.value = response.data.messages
     
     // initial ping to mark online
     await pingChat(true)
+    await markVisitorRead()
     setupUrlTracking()
 
     // Check if there's a pending user info request (request exists but no response yet)
@@ -125,6 +147,17 @@ onMounted(async () => {
           // Hide form if user just submitted response
           if (e.message.message_type === 'user_info_response' && e.message.sender_type === 'visitor') {
             showUserForm.value = false
+          }
+          if (e.message.sender_type === 'agent') {
+            markVisitorRead()
+          }
+        })
+        .listen('ChatReadUpdated', (e) => {
+          if (e.agentLastReadAt) {
+            chatReadState.value.agent_last_read_at = e.agentLastReadAt
+          }
+          if (e.visitorLastReadAt) {
+            chatReadState.value.visitor_last_read_at = e.visitorLastReadAt
           }
         })
     }
@@ -182,6 +215,24 @@ const pingChat = async (force = false) => {
     await axios.post(pingUrl, { chat_id: chatId, current_url: currentUrl }, { headers })
   } catch (err) {
     console.error('Ping failed', err)
+  }
+}
+
+const markVisitorRead = async () => {
+  if (!chatId) return
+  try {
+    const cfg = window.ChatConfig || {}
+    const apiBase = cfg.apiBase || ''
+    const headers = {}
+    if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
+
+    const readUrl = apiBase ? apiBase + '/chat/read' : '/chat/read'
+    const payload = { chat_id: chatId }
+    if (visitorId) payload.visitor_id = visitorId
+    await axios.post(readUrl, payload, { headers })
+    chatReadState.value.visitor_last_read_at = new Date().toISOString()
+  } catch (err) {
+    // silent: receipts should not block chatting
   }
 }
 
@@ -413,6 +464,9 @@ const cancelUserInfo = () => {
             </div>
             <div class="text-xs opacity-50 text-right mt-1">
               {{ formatTime(msg.created_at) }}
+              <span v-if="msg.sender_type === 'visitor'" :class="isVisitorMessageReadByAgent(msg) ? 'text-info' : ''">
+                {{ isVisitorMessageReadByAgent(msg) ? ' ✓✓' : ' ✓' }}
+              </span>
             </div>
           </div>
         </div>

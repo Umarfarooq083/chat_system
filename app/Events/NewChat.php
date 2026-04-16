@@ -57,6 +57,7 @@ class NewChat implements ShouldBroadcastNow
                 'last_activity' => $this->chat->last_activity?->toIso8601String(),
                 'last_message_at' => $this->chat->last_message_at?->toIso8601String(),
                 'agent_last_read_at' => $this->chat->agent_last_read_at?->toIso8601String(),
+                'visitor_last_read_at' => $this->chat->visitor_last_read_at?->toIso8601String(),
                 'created_at' => $this->chat->created_at?->toIso8601String(),
                 'updated_at' => $this->chat->updated_at?->toIso8601String(),
                 'latest_message' => $latest ? [

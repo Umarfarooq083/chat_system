@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ChatReadUpdated;
 use App\Events\MessageSent;
 use App\Events\NewChat;
 use App\Models\Chat;
@@ -14,6 +15,17 @@ use Inertia\Inertia;
 
 class ChatController extends Controller
 {
+    private function broadcastReadUpdate(Chat $chat, string $readerType): void
+    {
+        broadcast(new ChatReadUpdated($chat, $readerType));
+    }
+
+    private function canVisitorAccessChat(Chat $chat): bool
+    {
+        $visitorId = session('visitor_id');
+        return is_string($visitorId) && $visitorId !== '' && $chat->visitor_id === $visitorId;
+    }
+
     private function extractUserInfoFieldFromMessage(string $message, string $label): ?string
     {
         $pattern = '/^' . preg_quote($label, '/') . '\\s*:\\s*(.+)\\s*$/mi';
@@ -110,6 +122,7 @@ class ChatController extends Controller
 
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
+                $chat->visitor_last_read_at = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
 
@@ -170,6 +183,9 @@ class ChatController extends Controller
             $chat->save();
 
             broadcast(new MessageSent($message));
+            if ($request->sender_type === 'agent') {
+                $this->broadcastReadUpdate($chat, 'agent');
+            }
 
             return response()->noContent();
         } catch (\Throwable $e) {
@@ -267,6 +283,7 @@ class ChatController extends Controller
                 'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
+                'visitor_last_read_at' => now(),
             ]
         );
 
@@ -303,6 +320,7 @@ class ChatController extends Controller
                 'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
+                'visitor_last_read_at' => now(),
             ]
         );
         // mark visitor active
@@ -335,6 +353,7 @@ class ChatController extends Controller
             [
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
+                'visitor_last_read_at' => now(),
             ]
         );
         if (!$chat->ip) {
@@ -377,6 +396,7 @@ class ChatController extends Controller
             $chat = Chat::find($request->chat_id);
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
+                $chat->visitor_last_read_at = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
 
@@ -422,6 +442,9 @@ class ChatController extends Controller
             $chat->save();
 
             broadcast(new MessageSent($message));
+            if ($request->sender_type === 'agent') {
+                $this->broadcastReadUpdate($chat, 'agent');
+            }
             return response()->noContent();
         } catch (\Throwable $e) {
             report($e);
@@ -480,6 +503,47 @@ class ChatController extends Controller
         return response()->json(['status' => 'ok']);
     }
 
+    public function markVisitorRead(Request $request)
+    {
+        $validated = $request->validate([
+            'chat_id' => 'required|exists:chats,id',
+            'visitor_id' => 'nullable|string|max:100',
+        ]);
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        $sessionAllowed = $this->canVisitorAccessChat($chat);
+        $payloadVisitorId = is_string($validated['visitor_id'] ?? null) ? trim((string) $validated['visitor_id']) : null;
+        $payloadAllowed = $payloadVisitorId
+            && preg_match('/^[a-zA-Z0-9._-]{8,100}$/', $payloadVisitorId) === 1
+            && hash_equals((string) $chat->visitor_id, $payloadVisitorId);
+
+        if (!$sessionAllowed && !$payloadAllowed) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $chat->visitor_last_read_at = now();
+        $chat->save();
+
+        $this->broadcastReadUpdate($chat, 'visitor');
+
+        return response()->noContent();
+    }
+
+    public function externalMarkVisitorRead(Request $request)
+    {
+        $validated = $request->validate([
+            'chat_id' => 'required|exists:chats,id',
+        ]);
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        $chat->visitor_last_read_at = now();
+        $chat->save();
+
+        $this->broadcastReadUpdate($chat, 'visitor');
+
+        return response()->noContent();
+    }
+
 
     public function sendUserInfo(Request $request)
     {
@@ -514,6 +578,9 @@ class ChatController extends Controller
         $chat->save();
 
         broadcast(new MessageSent($message));
+        if ($request->sender_type === 'agent') {
+            $this->broadcastReadUpdate($chat, 'agent');
+        }
 
         return response()->json(['message' => $message]);
     }

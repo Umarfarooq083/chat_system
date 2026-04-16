@@ -31,12 +31,14 @@ class Chat extends Model
         'last_activity',
         'last_message_at',
         'agent_last_read_at',
+        'visitor_last_read_at',
     ];
 
     protected $casts = [
         'last_activity' => 'datetime',
         'last_message_at' => 'datetime',
         'agent_last_read_at' => 'datetime',
+        'visitor_last_read_at' => 'datetime',
         'user_info_submitted_at' => 'datetime',
         'external_api_fetched_at' => 'datetime',
         'external_api_pdf_sent_at' => 'datetime',
