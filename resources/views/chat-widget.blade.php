@@ -34,6 +34,10 @@
         .attachment img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
         .attachment .remove { cursor: pointer; color: #ef4444; font-weight: bold; }
     </style>
+
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+
 </head>
 <body>
 <div class="wrap">
@@ -58,9 +62,9 @@
         </div>
     </div>
     <div class="composer">
+        <button class="attach-btn" id="attachBtn" type="button" title="Attach file"><i data-v-bff3308f="" class="fa fa-paperclip"></i></button>
         <input class="input" id="text" placeholder="Type a message…" autocomplete="off">
         <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
-        <button class="attach-btn" id="attachBtn" type="button" title="Attach file">📎</button>
         <button class="send" id="sendBtn" type="button" disabled>Send</button>
     </div>
 </div>
@@ -108,11 +112,26 @@
     let attachedFile = null;
     let lastSentUrl = null;
     let urlTrackingSetup = false;
+    let agentLastReadAt = null;
+    let visitorLastReadAt = null;
 
     function formatMessageBody(value) {
         if (value === null || value === undefined) return '';
         if (typeof value === 'string') return value;
         try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+    }
+
+    function toMillis(value) {
+        if (!value) return null;
+        const ts = new Date(value).getTime();
+        return Number.isNaN(ts) ? null : ts;
+    }
+
+    function isVisitorMessageReadByAgent(message) {
+        if (!message || message.sender_type !== 'visitor') return false;
+        const messageTs = toMillis(message.created_at);
+        const agentReadTs = toMillis(agentLastReadAt);
+        return messageTs !== null && agentReadTs !== null && messageTs <= agentReadTs;
     }
 
     function renderMessage(latestMessage) {
@@ -123,6 +142,8 @@
         
         const div = document.createElement('div');
         div.className = 'msg ' + (latestMessage.sender_type === 'visitor' ? 'visitor' : 'agent');
+        div.dataset.senderType = latestMessage.sender_type || '';
+        div.dataset.createdAt = latestMessage.created_at || '';
         const body = document.createElement('div');
         
         if (latestMessage.message_type === 'user_info_response') {
@@ -158,7 +179,11 @@
         if (latestMessage.created_at) {
             const meta = document.createElement('div');
             meta.className = 'meta';
-            meta.textContent = new Date(latestMessage.created_at).toLocaleString();
+            const formatted = new Date(latestMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const tick = latestMessage.sender_type === 'visitor'
+                ? (isVisitorMessageReadByAgent(latestMessage) ? ' ✓✓' : ' ✓')
+                : '';
+            meta.textContent = formatted + tick;
             div.appendChild(meta);
         }
         messagesEl.appendChild(div);
@@ -167,6 +192,18 @@
         if (latestMessage.id) {
             renderedMessageIds.add(latestMessage.id);
         }
+    }
+
+    function refreshVisitorTicks() {
+        const rows = messagesEl.querySelectorAll('.msg.visitor');
+        rows.forEach((row) => {
+            const createdAt = row.dataset.createdAt;
+            const meta = row.querySelector('.meta');
+            if (!createdAt || !meta) return;
+            const formatted = new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const read = isVisitorMessageReadByAgent({ sender_type: 'visitor', created_at: createdAt });
+            meta.textContent = formatted + (read ? ' ✓✓' : ' ✓');
+        });
     }
 
     function updateFormVisibility() {
@@ -191,7 +228,14 @@
             const text = await res.text().catch(() => '');
             throw new Error(`Request failed (${res.status}): ${text || res.statusText}`);
         }
-        return res.json();
+        if (res.status === 204) return null;
+        const text = await res.text().catch(() => '');
+        if (!text) return null;
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            return null;
+        }
     }
 
     function initPusher() {
@@ -228,9 +272,17 @@
                 if (message.message_type === 'user_info_response' && message.sender_type === 'visitor') {
                     showUserForm = false;
                 }
+                if (message.sender_type === 'agent') {
+                    markVisitorRead();
+                }
                 updateFormVisibility();
                 scrollToBottom();
             }
+        });
+        channel.bind('App\\Events\\ChatReadUpdated', function(data) {
+            if (data.agentLastReadAt) agentLastReadAt = data.agentLastReadAt;
+            if (data.visitorLastReadAt) visitorLastReadAt = data.visitorLastReadAt;
+            if (data.readerType === 'agent') refreshVisitorTicks();
         });
     }
 
@@ -252,6 +304,8 @@
             const data = await response.json();
 
             chatId = data.chat.id;
+            agentLastReadAt = data.chat?.agent_last_read_at || null;
+            visitorLastReadAt = data.chat?.visitor_last_read_at || null;
             messagesEl.innerHTML = '';
             renderedMessageIds.clear(); // Clear previous message IDs
             (data.messages || []).forEach(m => {
@@ -269,6 +323,7 @@
             
             // initial ping to mark online
             await pingChat(true);
+            await markVisitorRead();
             setupUrlTracking();
 
             // Initialize Pusher and subscribe to chat channel
@@ -363,6 +418,16 @@
             alert('Failed to send info. Please try again.');
         } finally {
             submitInfoBtn.disabled = false;
+        }
+    }
+
+    async function markVisitorRead() {
+        if (!chatId) return;
+        try {
+            await postJson(`${apiBase}/chat/read`, { visitor_id: visitorId, chat_id: chatId });
+            visitorLastReadAt = new Date().toISOString();
+        } catch (e) {
+            // no-op: read receipts are best effort
         }
     }
 
@@ -515,4 +580,3 @@
 </script>
 </body>
 </html>
-

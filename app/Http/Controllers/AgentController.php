@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ChatReadUpdated;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use App\Models\Chat;
@@ -226,11 +227,13 @@ class AgentController extends Controller
             } else {
                 $chat->agent_last_read_at = now();
                 $chat->save();
+                broadcast(new ChatReadUpdated($chat, 'agent'));
             }
         } else {
             $chat->assigned_agent_id = auth()->id();
             $chat->agent_last_read_at = now();
             $chat->save();
+            broadcast(new ChatReadUpdated($chat, 'agent'));
         }
         return response()->noContent();
     }
@@ -503,6 +506,7 @@ class AgentController extends Controller
             }
             $chat->save();
             broadcast(new MessageSent($message));
+            broadcast(new ChatReadUpdated($chat, 'agent'));
             return response()->json([
                 'chat' => $chat,
                 'message' => $message,

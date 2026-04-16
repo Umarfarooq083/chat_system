@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ChatReadUpdated;
 use App\Events\MessageSent;
 use App\Events\NewChat;
 use App\Models\Chat;
@@ -54,11 +55,13 @@ class ChatWidgetController extends Controller
                 'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
+                'visitor_last_read_at' => now(),
             ]
         );
 
         $currentUrl = $validated['current_url'] ?? null;
         $chat->last_activity = now();
+        $chat->visitor_last_read_at = now();
         if (!$chat->ip) {
             $chat->ip = $request->ip();
         }
@@ -81,6 +84,8 @@ class ChatWidgetController extends Controller
             'chat' => [
                 'id' => $chat->id,
                 'visitor_id' => $chat->visitor_id,
+                'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
+                'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
             ],
             'messages' => $messages->map(fn (Message $m) => $this->serializeMessage($m))->values(),
         ]);
@@ -179,6 +184,7 @@ class ChatWidgetController extends Controller
 
         $chat->last_message_at = $message->created_at;
         $chat->last_activity = now();
+        $chat->visitor_last_read_at = now();
         if (!$chat->ip) {
             $chat->ip = $request->ip();
         }
@@ -195,6 +201,30 @@ class ChatWidgetController extends Controller
         return response()->json([
             'message' => $this->serializeMessage($message),
         ]);
+    }
+
+    public function markRead(Request $request)
+    {
+        $validated = $request->validate([
+            'visitor_id' => 'required|string|max:100',
+            'chat_id' => 'required|integer|exists:chats,id',
+        ]);
+
+        if (preg_match(self::VISITOR_ID_PATTERN, (string) $validated['visitor_id']) !== 1) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        if ((string) $chat->visitor_id !== (string) $validated['visitor_id']) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $chat->visitor_last_read_at = now();
+        $chat->save();
+
+        broadcast(new ChatReadUpdated($chat, 'visitor'));
+
+        return response()->noContent();
     }
 
     public function messages(Request $request)

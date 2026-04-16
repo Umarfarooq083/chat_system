@@ -520,6 +520,11 @@ const markChatRead = async (chatId, force = false) => {
   try {
     await axios.post(`/agent/chats/${chatId}/read`)
     chat.unread_count = 0
+    const nowIso = new Date().toISOString()
+    chat.agent_last_read_at = nowIso
+    if (selectedChat.value?.id === chatId) {
+      selectedChat.value.agent_last_read_at = nowIso
+    }
   } catch (e) {
   } finally {
     markingRead.value.delete(chatId)
@@ -644,6 +649,16 @@ const subscribeToChat = (chatId) => {
     .listen('MessageSent', (e) => {
       addMessage(e.message.chat_id, e.message)
     })
+    .listen('ChatReadUpdated', (e) => {
+      const chat = chats.value.find(c => c.id === e.chatId)
+      if (!chat) return
+      if (e.agentLastReadAt) chat.agent_last_read_at = e.agentLastReadAt
+      if (e.visitorLastReadAt) chat.visitor_last_read_at = e.visitorLastReadAt
+      if (selectedChat.value?.id === chat.id) {
+        if (e.agentLastReadAt) selectedChat.value.agent_last_read_at = e.agentLastReadAt
+        if (e.visitorLastReadAt) selectedChat.value.visitor_last_read_at = e.visitorLastReadAt
+      }
+    })
     .listen('ChatPing', (e) => {
       const chat = chats.value.find(c => c.id === e.chatId)
       if (chat) {
@@ -683,6 +698,34 @@ const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
 }
 const attachmentViewUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_view_url))
 const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
+const formatMessageTime = (timestamp) => {
+  if (!timestamp) return ''
+  try {
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } catch (e) {
+    return ''
+  }
+}
+
+const toMillis = (value) => {
+  if (!value) return null
+  const ts = new Date(value).getTime()
+  return Number.isNaN(ts) ? null : ts
+}
+
+const isMessageReadByRecipient = (msg) => {
+  if (!msg || !selectedChat.value) return false
+  const messageTs = toMillis(msg.created_at)
+  if (messageTs === null) return false
+
+  if (msg.sender_type === 'agent') {
+    const visitorReadTs = toMillis(selectedChat.value.visitor_last_read_at)
+    return visitorReadTs !== null && messageTs <= visitorReadTs
+  }
+
+  const agentReadTs = toMillis(selectedChat.value.agent_last_read_at)
+  return agentReadTs !== null && messageTs <= agentReadTs
+}
 
 </script>
 
@@ -1205,6 +1248,14 @@ const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_dow
                 ]">
                   {{ msg.message }}
                 </div>
+              </div>
+
+              <div class="mt-1 text-[11px] text-slate-400 flex items-center gap-1"
+                :class="msg.sender_type === 'agent' ? 'justify-end pr-1' : 'justify-start pl-1'">
+                <span>{{ formatMessageTime(msg.created_at) }}</span>
+                <span v-if="msg.sender_type === 'agent'" :class="isMessageReadByRecipient(msg) ? 'text-sky-500' : 'text-slate-400'">
+                  {{ isMessageReadByRecipient(msg) ? '✓✓' : '✓' }}
+                </span>
               </div>
             </div>
           </div>
