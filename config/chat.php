@@ -9,6 +9,10 @@ return [
     'widget_title' => env('CHAT_WIDGET_TITLE', 'Chat'),
     'widget_brand_color' => env('CHAT_WIDGET_BRAND_COLOR', '#111827'),
 
+    // Initial message shown when a chat is created for the first time.
+    'welcome_message' => env('CHAT_WELCOME_MESSAGE', 'Welcome! How can we help you today?'),
+    'widget_welcome_message' => env('CHAT_WIDGET_WELCOME_MESSAGE', 'Welcome! How can we help you today?'),
+
     // Third-party registration API (used by agent UI)
     // Given cURL example:
     // GET http://webtointr.bwcapp.net/api/chatbwc/ledger?file=34324&test=12

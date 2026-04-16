@@ -80,6 +80,7 @@ class AgentController extends Controller
         ]);
     }
 
+
     public function index()
     {
         $chats = Chat::query()
@@ -101,21 +102,21 @@ class AgentController extends Controller
                     $query
                         ->where('sender_type', 'visitor')
                         ->where(function ($q) {
-                            $q
-                                ->whereNull('chats.agent_last_read_at')
-                                ->orWhereColumn('messages.created_at', '>', 'chats.agent_last_read_at');
+                            $q->whereNull('chats.agent_last_read_at')
+                            ->orWhereColumn('messages.created_at', '>', 'chats.agent_last_read_at');
                         });
                 },
             ])
+            ->where('last_message_at', '>=', now()->subHours(24))
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();
-        // append online indicator
+
         $chats->each->append('is_online');
+
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
             'auth_user' => auth()->user(),
-            // used by the agent UI to poll for updates without needing a full reload
             'pollCursor' => now()->toIso8601String(),
         ]);
     }
