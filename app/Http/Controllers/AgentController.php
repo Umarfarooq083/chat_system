@@ -542,18 +542,31 @@ class AgentController extends Controller
     /**
      * Display chat system reports and analytics.
      */
-    public function reports()
+    public function reports(Request $request)
     {
+        $validated = $request->validate([
+            'from' => 'nullable|date',
+            'to'   => 'nullable|date',
+        ]);
+
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::today()->startOfDay();
+        $to   = isset($validated['to'])   ? Carbon::parse($validated['to'])->endOfDay()     : Carbon::today()->endOfDay();
+
+        // Ensure from is not after to
+        if ($from->gt($to)) {
+            [$from, $to] = [$to, $from];
+        }
+    // dd(Carbon::now());
         $stats = [
-            'total_visits' => Chat::whereDate('created_at', Carbon::today())->count(),
-            'users_who_messaged' => Chat::whereDate('created_at', Carbon::today())->whereHas('messages', function ($q) {
+            'total_visits' => Chat::whereBetween('created_at', [$from, $to])->count(),
+            'users_who_messaged' => Chat::whereBetween('created_at', [$from, $to])->whereHas('messages', function ($q) {
                 $q->where('sender_type', 'visitor');
             })->count(),
 
-            'active_chats_count' => Chat::whereDate('created_at', Carbon::today())->where('status', 'open')->count(),
-            'unassigned_chats_count' => Chat::whereDate('created_at', Carbon::today())->whereNull('assigned_agent_id')->count(),
+            'active_chats_count' => Chat::whereBetween('created_at', [$from, $to])->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            'unassigned_chats_count' => Chat::whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
             'chats_by_status' => Chat::select('status', DB::raw('count(*) as count'))
-                ->whereDate('created_at', Carbon::today())
+                ->whereBetween('created_at', [$from, $to])
                 ->groupBy('status')
                 ->get(),
             'agent_concurrency' => DB::table('messages')
@@ -575,16 +588,18 @@ class AgentController extends Controller
                         END) as user_replied_users
                     ")
                 )
-                ->whereDate('messages.created_at', Carbon::today())
+                ->whereBetween('chats.created_at', [$from, $to])
                 ->whereNotNull('chats.assigned_agent_id')
                 ->groupBy('chats.assigned_agent_id', 'agents.name')
                 ->get(),
-
-            
         ];
-        // dd($stats['agent_concurrency']);
+
         return Inertia::render('Agent/Reports', [
-            'stats' => $stats
+            'stats'   => $stats,
+            'filters' => [
+                'from' => $from->toDateString(),
+                'to'   => $to->toDateString(),
+            ],
         ]);
     }
 
