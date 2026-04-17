@@ -75,7 +75,6 @@ class AgentController extends Controller
         }
     }
 
-
     public function index()
     {
         $chats = Chat::query()
@@ -563,7 +562,7 @@ class AgentController extends Controller
                 $q->where('sender_type', 'visitor');
             })->count(),
 
-            'active_chats_count' => Chat::whereBetween('created_at', [$from, $to])->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            'active_chats_count' => Chat::whereBetween('created_at', [$from, $to])->where('status','open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
             'unassigned_chats_count' => Chat::whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
             'chats_by_status' => Chat::select('status', DB::raw('count(*) as count'))
                 ->whereBetween('created_at', [$from, $to])

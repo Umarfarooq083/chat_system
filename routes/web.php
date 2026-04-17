@@ -3,7 +3,9 @@
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ChatWidgetController;
+use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\UserController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -26,15 +28,12 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-
-
 // Route::get('/chat', function () {
 //     if (!session()->has('visitor_id')) {
 //         session(['visitor_id' => \Str::uuid()]);
 //     }
-//     return Inertia::render('VisitorChat'); 
+//     return Inertia::render('VisitorChat');
 // });
-
 
 Route::get('/chat', [ChatController::class, 'visitorChat']);
 
@@ -62,14 +61,18 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agent/chats/{chat}/external/send-html', [AgentController::class, 'sendExternalHtml'])->name('agent.chat.external.sendHtml');
     Route::post('/agent/chats/{chat}/external/send-pdf', [AgentController::class, 'sendExternalPdf'])->name('agent.chat.external.sendPdf');
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
-});
 
+    // Company CRUD routes
+    Route::resource('companies', CompanyController::class);
+
+    // User CRUD routes
+    Route::resource('users', UserController::class);
+});
 
 Route::post('/visitor-chat/create', [ChatController::class, 'getOrCreateChat']);
 // Route::post('/send-message', [ChatController::class, 'sendMessage']);
 
 require __DIR__.'/auth.php';
-
 
 // phone no (required)
 // customer name (required)

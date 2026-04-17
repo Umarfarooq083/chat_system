@@ -51,6 +51,18 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Reports
                                 </NavLink>
+                                <NavLink
+                                    :href="route('companies.index')"
+                                    :active="route().current('companies.index')"
+                                >
+                                    Companies
+                                </NavLink>
+                                <NavLink
+                                    :href="route('users.index')"
+                                    :active="route().current('users.index')"
+                                >
+                                    Users
+                                </NavLink>
                             </div>
                         </div>
 
@@ -169,6 +181,18 @@ const showingNavigationDropdown = ref(false);
                             :active="route().current('agent.reports')"
                         >
                             Reports
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('companies.index')"
+                            :active="route().current('companies.index')"
+                        >
+                            Companies
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('users.index')"
+                            :active="route().current('users.index')"
+                        >
+                            Users
                         </ResponsiveNavLink>
                     </div>
 
