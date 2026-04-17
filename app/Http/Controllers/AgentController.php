@@ -14,6 +14,7 @@ use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 class AgentController extends Controller
 {
@@ -72,13 +73,8 @@ class AgentController extends Controller
                 'message' => 'CNIC lookup failed.' . $e->getMessage(),
             ], 500);
         }
-
-        return response()->json([
-            'source' => 'local',
-            'cnic' => $digits,
-            'message' => 'CNIC received. Configure CNIC_LOOKUP_API_URL to enable live lookup.',
-        ]);
     }
+
 
     public function index()
     {
@@ -101,21 +97,21 @@ class AgentController extends Controller
                     $query
                         ->where('sender_type', 'visitor')
                         ->where(function ($q) {
-                            $q
-                                ->whereNull('chats.agent_last_read_at')
-                                ->orWhereColumn('messages.created_at', '>', 'chats.agent_last_read_at');
+                            $q->whereNull('chats.agent_last_read_at')
+                            ->orWhereColumn('messages.created_at', '>', 'chats.agent_last_read_at');
                         });
                 },
             ])
+            ->where('last_message_at', '>=', now()->subHours(24))
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();
-        // append online indicator
+
         $chats->each->append('is_online');
+
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
             'auth_user' => auth()->user(),
-            // used by the agent UI to poll for updates without needing a full reload
             'pollCursor' => now()->toIso8601String(),
         ]);
     }
@@ -541,6 +537,116 @@ class AgentController extends Controller
         }
 
         return $html;
+    }
+
+    /**
+     * Display chat system reports and analytics.
+     */
+    public function reports(Request $request)
+    {
+        $validated = $request->validate([
+            'from' => 'nullable|date',
+            'to'   => 'nullable|date',
+        ]);
+
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::today()->startOfDay();
+        $to   = isset($validated['to'])   ? Carbon::parse($validated['to'])->endOfDay()     : Carbon::today()->endOfDay();
+
+        // Ensure from is not after to
+        if ($from->gt($to)) {
+            [$from, $to] = [$to, $from];
+        }
+    // dd(Carbon::now());
+        $stats = [
+            'total_visits' => Chat::whereBetween('created_at', [$from, $to])->count(),
+            'users_who_messaged' => Chat::whereBetween('created_at', [$from, $to])->whereHas('messages', function ($q) {
+                $q->where('sender_type', 'visitor');
+            })->count(),
+
+            'active_chats_count' => Chat::whereBetween('created_at', [$from, $to])->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            'unassigned_chats_count' => Chat::whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
+            'chats_by_status' => Chat::select('status', DB::raw('count(*) as count'))
+                ->whereBetween('created_at', [$from, $to])
+                ->groupBy('status')
+                ->get(),
+            'agent_concurrency' => DB::table('messages')
+                ->join('chats', 'messages.chat_id', '=', 'chats.id')
+                ->join('users as agents', 'chats.assigned_agent_id', '=', 'agents.id')
+                ->select(
+                    'chats.assigned_agent_id',
+                    'agents.name',
+                    DB::raw("
+                        COUNT(DISTINCT CASE 
+                            WHEN messages.sender_type = 'agent' 
+                            THEN chats.id 
+                        END) as agent_sent_users
+                    "),
+                    DB::raw("
+                        COUNT(DISTINCT CASE 
+                            WHEN messages.sender_type = 'visitor' 
+                            THEN chats.id 
+                        END) as user_replied_users
+                    ")
+                )
+                ->whereBetween('chats.created_at', [$from, $to])
+                ->whereNotNull('chats.assigned_agent_id')
+                ->groupBy('chats.assigned_agent_id', 'agents.name')
+                ->get(),
+        ];
+
+        return Inertia::render('Agent/Reports', [
+            'stats'   => $stats,
+            'filters' => [
+                'from' => $from->toDateString(),
+                'to'   => $to->toDateString(),
+            ],
+        ]);
+    }
+
+    /**
+     * Export chat reports to a CSV file.
+     */
+    public function exportReports()
+    {
+        $dailyStats = Chat::select(
+            DB::raw('DATE(created_at) as date'),
+            DB::raw('count(*) as visits'),
+            DB::raw('count(CASE WHEN user_info_submitted_at IS NOT NULL THEN 1 END) as info_submissions'),
+            DB::raw('(SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, msg_v.created_at, msg_a.created_at)), 0) 
+                      FROM messages msg_v 
+                      JOIN messages msg_a ON msg_v.chat_id = msg_a.chat_id 
+                      WHERE msg_v.sender_type = "visitor" AND msg_a.sender_type = "agent" 
+                      AND msg_a.created_at > msg_v.created_at 
+                      AND DATE(msg_v.created_at) = DATE(ANY_VALUE(chats.created_at))) as avg_response_time')
+        )
+        ->where('created_at', '>=', now()->subDays(30))
+        ->groupBy('date')
+        ->orderBy('date', 'desc')
+        ->get();
+
+        $fileName = 'chat_reports_' . date('Y-m-d') . '.csv';
+        $headers = [
+            "Content-type"        => "text/csv",
+            "Content-Disposition" => "attachment; filename=$fileName",
+            "Pragma"              => "no-cache",
+            "Cache-Control"       => "must-revalidate, post-check=0, pre-check=0",
+            "Expires"             => "0"
+        ];
+
+        $columns = ['Date', 'Visits', 'Leads (Info Submissions)', 'Avg Response Time (seconds)'];
+
+        $callback = function() use($dailyStats, $columns) {
+            $file = fopen('php://output', 'w');
+            fputcsv($file, $columns);
+
+            foreach ($dailyStats as $row) {
+                fputcsv($file, [$row->date, $row->visits, $row->info_submissions, $row->avg_response_time ?? 0]);
+            }
+
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
     }
 
 }

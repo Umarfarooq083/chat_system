@@ -15,6 +15,30 @@ class ChatWidgetController extends Controller
 {
     private const VISITOR_ID_PATTERN = '/^[a-zA-Z0-9._-]{8,100}$/';
 
+    private function createWelcomeMessageIfNeeded(Chat $chat): void
+    {
+        if ($chat->messages()->exists()) {
+            return;
+        }
+
+        $text = trim((string) config('chat.widget_welcome_message'));
+        if ($text === '') {
+            return;
+        }
+
+        $welcomeMessage = Message::create([
+            'chat_id' => $chat->id,
+            'sender_type' => 'agent',
+            'message' => $text,
+            'message_type' => 'welcome',
+        ]);
+
+        $chat->last_message_at = $welcomeMessage->created_at;
+        $chat->save();
+
+        broadcast(new MessageSent($welcomeMessage));
+    }
+
     public function page(Request $request)
     {
         $title = $request->query('title');
@@ -58,6 +82,7 @@ class ChatWidgetController extends Controller
                 'visitor_last_read_at' => now(),
             ]
         );
+        $this->createWelcomeMessageIfNeeded($chat);
 
         $currentUrl = $validated['current_url'] ?? null;
         $chat->last_activity = now();

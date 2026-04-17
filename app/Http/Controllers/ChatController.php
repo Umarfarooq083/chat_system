@@ -15,6 +15,30 @@ use Inertia\Inertia;
 
 class ChatController extends Controller
 {
+    private function createWelcomeMessageIfNeeded(Chat $chat, ?string $welcomeText = null): void
+    {
+        if ($chat->messages()->exists()) {
+            return;
+        }
+
+        $text = trim((string) ($welcomeText ?? config('chat.welcome_message')));
+        if ($text === '') {
+            return;
+        }
+
+        $welcomeMessage = Message::create([
+            'chat_id' => $chat->id,
+            'sender_type' => 'agent',
+            'message' => $text,
+            'message_type' => 'welcome',
+        ]);
+
+        $chat->last_message_at = $welcomeMessage->created_at;
+        $chat->save();
+
+        broadcast(new MessageSent($welcomeMessage));
+    }
+
     private function broadcastReadUpdate(Chat $chat, string $readerType): void
     {
         broadcast(new ChatReadUpdated($chat, $readerType));
@@ -286,6 +310,7 @@ class ChatController extends Controller
                 'visitor_last_read_at' => now(),
             ]
         );
+        $this->createWelcomeMessageIfNeeded($chat, config('chat.welcome_message'));
 
         if (!$chat->ip) {
             $chat->ip = $request->ip();
@@ -323,6 +348,7 @@ class ChatController extends Controller
                 'visitor_last_read_at' => now(),
             ]
         );
+        $this->createWelcomeMessageIfNeeded($chat, config('chat.welcome_message'));
         // mark visitor active
         $chat->last_activity = now();
         if (!$chat->ip) {
@@ -356,6 +382,7 @@ class ChatController extends Controller
                 'visitor_last_read_at' => now(),
             ]
         );
+        $this->createWelcomeMessageIfNeeded($chat, config('chat.widget_welcome_message'));
         if (!$chat->ip) {
             $chat->ip = $request->ip();
         }

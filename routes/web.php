@@ -48,6 +48,8 @@ Route::get('/chat-widget', [ChatWidgetController::class, 'page'])->name('chat-wi
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats', [AgentController::class, 'index'])->name('agent.chats');
+    Route::get('/agent/reports', [AgentController::class, 'reports'])->name('agent.reports');
+    Route::get('/agent/reports/export', [AgentController::class, 'exportReports'])->name('agent.reports.export');
     Route::get('/agent/chats/poll', [AgentController::class, 'poll'])->name('agent.chats.poll');
     Route::get('/agent/chats/{chat}', [AgentController::class, 'show'])->name('agent.chat.show');
     Route::get('/agent/chats/{chat}/messages', [AgentController::class, 'messages'])->name('agent.chat.messages');
