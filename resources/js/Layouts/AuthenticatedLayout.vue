@@ -45,6 +45,12 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Chat System
                                 </NavLink>
+                                <NavLink
+                                    :href="route('agent.reports')"
+                                    :active="route().current('agent.reports')"
+                                >
+                                    Reports
+                                </NavLink>
                             </div>
                         </div>
 
@@ -152,6 +158,18 @@ const showingNavigationDropdown = ref(false);
                         >
                             Dashboard
                         </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('agent.chats')"
+                            :active="route().current('agent.chats')"
+                        >
+                            Chat System
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('agent.reports')"
+                            :active="route().current('agent.reports')"
+                        >
+                            Reports
+                        </ResponsiveNavLink>
                     </div>
 
                     <!-- Responsive Settings Options -->
@@ -203,5 +221,3 @@ const showingNavigationDropdown = ref(false);
         </div>
     </div>
 </template>
-
-
