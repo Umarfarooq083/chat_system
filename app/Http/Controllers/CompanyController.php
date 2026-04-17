@@ -8,14 +8,6 @@ use Inertia\Inertia;
 
 class CompanyController extends Controller
 {
-    // public function __construct()
-    // {
-    //     $this->middleware('auth')->except(['index']);
-    // }
-
-    /**
-     * Display a listing of the resource.
-     */
     public function index(Request $request)
     {
         $query = Company::query();
@@ -40,9 +32,17 @@ class CompanyController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'color' => 'nullable|string|hexcolor',
         ]);
 
-        Company::create($validated);
+        Company::create([
+            'name' => $validated['name'],
+            'description' => $validated['description'] ?? null,
+            'color' => $validated['color'] ?? '#000000',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        
 
         return redirect()
             ->route('companies.index')
@@ -71,6 +71,7 @@ class CompanyController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'color' => 'nullable|string|hexcolor',
         ]);
         if($request->name == 'Default'){
             return redirect()

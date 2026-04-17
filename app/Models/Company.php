@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -14,6 +15,7 @@ class Company extends Model
         'uuid',
         'name',
         'description',
+        'color',
     ];
 
     protected static function boot()
@@ -25,5 +27,10 @@ class Company extends Model
                 $company->uuid = (string) Str::uuid();
             }
         });
+    }
+
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'company_user');
     }
 }

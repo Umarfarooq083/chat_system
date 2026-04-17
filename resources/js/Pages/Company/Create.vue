@@ -6,6 +6,7 @@ import { ref } from 'vue';
 const form = ref({
     name: '',
     description: '',
+    color: '',
 });
 
 const errors = ref({});
@@ -18,7 +19,7 @@ function submit() {
     router.post(route('companies.store'), form.value, {
         preserveScroll: true,
         onSuccess: () => {
-            form.value = { name: '', description: '' };
+            form.value = { name: '', description: '', color: '' };
         },
         onError: (err) => {
             errors.value = err;
@@ -55,6 +56,16 @@ function submit() {
                                     :class="errors.name ? 'border-red-300' : ''"
                                 />
                                 <p v-if="errors.name" class="mt-1 text-sm text-red-600">{{ errors.name }}</p>
+                            </div>
+                            <div>
+                                <label for="color" class="block text-sm font-medium text-gray-700">Company Color</label>
+                                <input
+                                    type="color"
+                                    id="color"
+                                    v-model="form.color"
+                                    class="mt-1 block  rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                />
+                                <p v-if="errors.color" class="mt-1 text-sm text-red-600">{{ errors.color }}</p>
                             </div>
 
                             <!-- Description Field -->

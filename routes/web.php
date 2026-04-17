@@ -3,7 +3,9 @@
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ChatWidgetController;
+use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\UserController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -61,7 +63,10 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
 
     // Company CRUD routes
-    Route::resource('companies', \App\Http\Controllers\CompanyController::class);
+    Route::resource('companies', CompanyController::class);
+
+    // User CRUD routes
+    Route::resource('users', UserController::class);
 });
 
 Route::post('/visitor-chat/create', [ChatController::class, 'getOrCreateChat']);

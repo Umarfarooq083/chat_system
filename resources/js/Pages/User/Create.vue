@@ -1,19 +1,20 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ref, onMounted } from 'vue';
+import { ref } from 'vue';
 
 const props = defineProps({
-    company: {
-        type: Object,
+    companies: {
+        type: Array,
         required: true,
     },
 });
 
 const form = ref({
-    name: props.company.name,
-    description: props.company.description || '',
-    color: props.company.color || '#000000',
+    name: '',
+    email: '',
+    password: '',
+    company_ids: [],
 });
 
 const errors = ref({});
@@ -23,10 +24,10 @@ function submit() {
     submitting.value = true;
     errors.value = {};
 
-    router.put(route('companies.update', props.company.id), form.value, {
+    router.post(route('users.store'), form.value, {
         preserveScroll: true,
         onSuccess: () => {
-            // Success handling
+            form.value = { name: '', email: '', password: '', company_ids: [] };
         },
         onError: (err) => {
             errors.value = err;
@@ -37,12 +38,12 @@ function submit() {
 </script>
 
 <template>
-    <Head title="Edit Company" />
+    <Head title="Create User" />
 
     <AuthenticatedLayout>
         <template #header>
             <h2 class="text-xl font-semibold leading-tight text-gray-800">
-                Edit Company
+                Add New User
             </h2>
         </template>
 
@@ -51,18 +52,8 @@ function submit() {
                 <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                     <div class="p-6">
                         <form @submit.prevent="submit" class="space-y-6">
-                            <!-- UUID Display -->
                             <div>
-                                <label class="block text-sm font-medium text-gray-700">UUID</label>
-                                <div class="mt-1 block w-full bg-gray-100 px-3 py-2 rounded-md text-sm text-gray-500 font-mono">
-                                    {{ company.uuid }}
-                                </div>
-                                <p class="mt-1 text-xs text-gray-500">UUID cannot be changed</p>
-                            </div>
-
-                            <!-- Name Field -->
-                            <div>
-                                <label for="name" class="block text-sm font-medium text-gray-700">Company Name *</label>
+                                <label for="name" class="block text-sm font-medium text-gray-700">Name *</label>
                                 <input
                                     type="text"
                                     id="name"
@@ -73,36 +64,63 @@ function submit() {
                                 />
                                 <p v-if="errors.name" class="mt-1 text-sm text-red-600">{{ errors.name }}</p>
                             </div>
+
                             <div>
-                                <label for="color" class="block text-sm font-medium text-gray-700">Color</label>
+                                <label for="email" class="block text-sm font-medium text-gray-700">Email *</label>
                                 <input
-                                    type="color"
-                                    id="name"
-                                    v-model="form.color"
+                                    type="email"
+                                    id="email"
+                                    v-model="form.email"
                                     required
-                                    class="mt-1 block  rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                    :class="errors.color ? 'border-red-300' : ''"
-                                />
-                                <p v-if="errors.color" class="mt-1 text-sm text-red-600">{{ errors.color }}</p>
-                            </div>
-
-                            <!-- Description Field -->
-                            <div>
-                                <label for="description" class="block text-sm font-medium text-gray-700">Description</label>
-                                <textarea
-                                    id="description"
-                                    v-model="form.description"
-                                    rows="4"
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                    :class="errors.description ? 'border-red-300' : ''"
-                                ></textarea>
-                                <p v-if="errors.description" class="mt-1 text-sm text-red-600">{{ errors.description }}</p>
+                                    :class="errors.email ? 'border-red-300' : ''"
+                                />
+                                <p v-if="errors.email" class="mt-1 text-sm text-red-600">{{ errors.email }}</p>
                             </div>
 
-                            <!-- Actions -->
+                            <div>
+                                <label for="password" class="block text-sm font-medium text-gray-700">Password *</label>
+                                <input
+                                    type="password"
+                                    id="password"
+                                    v-model="form.password"
+                                    required
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                    :class="errors.password ? 'border-red-300' : ''"
+                                />
+                                <p v-if="errors.password" class="mt-1 text-sm text-red-600">{{ errors.password }}</p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Assign Companies</label>
+                                <div class="space-y-2">
+                                    <div
+                                        v-for="company in companies"
+                                        :key="company.id"
+                                        class="flex items-center"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            :id="'company-' + company.id"
+                                            :value="company.id"
+                                            v-model="form.company_ids"
+                                            class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <label :for="'company-' + company.id" class="ml-2 text-sm text-gray-700 flex items-center gap-2">
+                                            <span
+                                                class="w-3 h-3 rounded-full inline-block"
+                                                :style="{ backgroundColor: company.color }"
+                                            ></span>
+                                            {{ company.name }}
+                                        </label>
+                                    </div>
+                                </div>
+                                <p v-if="errors.company_ids" class="mt-1 text-sm text-red-600">{{ errors.company_ids }}</p>
+                            </div>
+
                             <div class="flex items-center justify-end gap-4">
                                 <Link
-                                    :href="route('companies.index')"
+                                    :href="route('users.index')"
                                     class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                                 >
                                     Cancel
@@ -116,7 +134,7 @@ function submit() {
                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                     </svg>
-                                    {{ submitting ? 'Saving...' : 'Save Changes' }}
+                                    {{ submitting ? 'Creating...' : 'Create User' }}
                                 </button>
                             </div>
                         </form>

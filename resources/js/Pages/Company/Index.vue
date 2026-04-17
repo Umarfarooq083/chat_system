@@ -62,6 +62,7 @@ function confirmDestroy(company) {
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Color</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UUID</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
@@ -70,6 +71,12 @@ function confirmDestroy(company) {
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                                 <tr v-for="company in companies.data" :key="company.id" >
+                                    <td class="px-6 py-4  text-sm text-gray-500 font-mono">
+                                        <span 
+                                            class="w-6 h-6 inline-block rounded border"
+                                            :style="{ backgroundColor: company.color }"
+                                        ></span>
+                                    </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
                                         {{ company.uuid }}
                                     </td>
