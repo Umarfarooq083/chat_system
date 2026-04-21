@@ -342,6 +342,7 @@
         if (!hasText && !hasFile) return;
         sendBtn.disabled = true;
         try {
+        console.log(document, 'umarfarooq');
             const formData = new FormData();
             formData.append('visitor_id', visitorId);
             formData.append('chat_id', chatId);

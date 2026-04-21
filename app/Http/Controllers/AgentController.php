@@ -77,6 +77,7 @@ class AgentController extends Controller
 
     public function index()
     {
+        // dd('dsdhakjsdhakjsd');
         $chats = Chat::query()
             ->with('agent')
             ->with([
@@ -101,6 +102,7 @@ class AgentController extends Controller
                         });
                 },
             ])
+            ->with('companyRel')
             ->where('last_message_at', '>=', now()->subHours(24))
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')

@@ -62,6 +62,7 @@ class ChatWidgetController extends Controller
 
     public function createChat(Request $request)
     {
+        dd($request->all());
         $validated = $request->validate([
             'visitor_id' => 'required|string|max:100',
             'current_url' => 'nullable|string|max:2048',

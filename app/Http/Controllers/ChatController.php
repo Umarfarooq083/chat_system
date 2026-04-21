@@ -6,6 +6,7 @@ use App\Events\ChatReadUpdated;
 use App\Events\MessageSent;
 use App\Events\NewChat;
 use App\Models\Chat;
+use App\Models\Company;
 use App\Models\Message;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -295,16 +296,19 @@ class ChatController extends Controller
 
     public function getOrCreateChat(Request $request)
     {
+        // dd($request->all());
         $request->validate([
             'current_url' => 'nullable|string|max:2048',
         ]);
         $visitorId = session()->get('visitor_id', Str::uuid());
         session()->put('visitor_id', $visitorId);
-
+        $Company = Company::where('name', 'Default')->first();
+        
         $chat = Chat::firstOrCreate(
             ['visitor_id' => $visitorId],
             [
                 'status' => 'open',
+                'company_id' => $Company->uuid ?? null,
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
                 'visitor_last_read_at' => now(),

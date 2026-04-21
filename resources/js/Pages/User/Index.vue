@@ -38,28 +38,30 @@ function confirmDestroy(user) {
                 <h2 class="text-xl font-semibold leading-tight text-gray-800">
                     Users
                 </h2>
-                <Link
-                    :href="route('users.create')"
-                    class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-                    </svg>
-                    Add User
-                </Link>
             </div>
         </template>
 
         <div class="py-12">
             <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
                 <div class="mb-6">
-                    <input
+                </div>
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                    <div class="flex gap-2">
+                        <input
                         v-model="search"
                         type="text"
                         placeholder="Search users..."
                         @input="router.get(route('users.index'), { search: search }, { preserveState: true })"
                         class="sm:w-64 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                     />
+                    </div>
+                    <Link :href="route('users.create')"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500" >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add User
+                    </Link>
                 </div>
 
                 <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
@@ -86,8 +88,8 @@ function confirmDestroy(user) {
                                             <span
                                                 v-for="company in user.companies"
                                                 :key="company.id"
-                                                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                                                :style="{ backgroundColor: company.color + '20', color: company.color }"
+                                                class="h-8 border inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                                :style="{ backgroundColor: company.color + '50', color: company.color }"
                                             >
                                                 {{ company.name }}
                                             </span>

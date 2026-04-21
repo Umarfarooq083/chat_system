@@ -32,6 +32,7 @@ class Chat extends Model
         'last_message_at',
         'agent_last_read_at',
         'visitor_last_read_at',
+        'company_id',
     ];
 
     protected $casts = [
@@ -68,6 +69,11 @@ class Chat extends Model
     public function agent()
     {
         return $this->hasOne(User::class, 'id', 'assigned_agent_id');
+    }
+    
+    public function companyRel()
+    {
+        return $this->hasOne(Company::class, 'uuid', 'company_id');
     }
 
     // Determine if visitor is currently online (active in last 2 minutes)
