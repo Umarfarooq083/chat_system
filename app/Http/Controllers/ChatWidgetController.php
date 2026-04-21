@@ -53,18 +53,21 @@ class ChatWidgetController extends Controller
             $brandColor = (string) (config('chat.widget_brand_color') ?? '#111827');
         }
 
+        $companyId = $request->query('companyId');
+
         return view('chat-widget', [
             'title' => $title,
             'brandColor' => $brandColor,
             'visitorId' => is_string($request->query('vid')) ? $request->query('vid') : null,
+            'companyId' => $companyId,
         ]);
     }
 
     public function createChat(Request $request)
     {
-        dd($request->all());
         $validated = $request->validate([
             'visitor_id' => 'required|string|max:100',
+            'company_id' => 'required|string|max:36',
             'current_url' => 'nullable|string|max:2048',
             'referrer_url' => 'nullable|string|max:2048',
         ]);
@@ -74,13 +77,16 @@ class ChatWidgetController extends Controller
             return response()->json(['message' => 'Invalid visitor_id'], 422);
         }
 
+        $companyId = $validated['company_id'];
+
         $chat = Chat::firstOrCreate(
-            ['visitor_id' => $visitorId],
+            ['visitor_id' => $visitorId, 'company_id' => $companyId ?: null],
             [
                 'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
                 'visitor_last_read_at' => now(),
+                'company_id' => $companyId ?: null,
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat);
@@ -122,6 +128,7 @@ class ChatWidgetController extends Controller
         $validated = $request->validate([
             'visitor_id' => 'required|string|max:100',
             'chat_id' => 'required|integer|exists:chats,id',
+            'company_id' => 'nullable|string|max:36',
             'message' => 'required_without:attachments|nullable|string|max:4000',
             'message_type' => 'nullable|string',
             'attachments' => 'nullable|file|max:20480',
@@ -139,6 +146,11 @@ class ChatWidgetController extends Controller
 
         $chat = Chat::findOrFail($validated['chat_id']);
         if ((string) $chat->visitor_id !== (string) $validated['visitor_id']) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $companyId = trim($validated['company_id'] ?? '');
+        if ($companyId !== '' && (string) $chat->company_id !== $companyId) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

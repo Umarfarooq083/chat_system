@@ -5,9 +5,6 @@ namespace App\Events;
 use App\Models\Chat;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Broadcasting\PresenceChannel;
-use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -47,6 +44,7 @@ class NewChat implements ShouldBroadcastNow
             'chat' => [
                 'id' => $this->chat->id,
                 'visitor_id' => $this->chat->visitor_id,
+                'company_id' => $this->chat->company_id,
                 'assigned_agent_id' => $this->chat->assigned_agent_id,
                 'status' => $this->chat->status,
                 'country' => $this->chat->country,

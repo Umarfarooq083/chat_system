@@ -10,6 +10,7 @@ use App\Models\ChatExternalApiFetch;
 use App\Models\ChatFeedback;
 use App\Models\Message;
 use App\Events\MessageSent;
+use App\Models\Company;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -77,7 +78,12 @@ class AgentController extends Controller
 
     public function index()
     {
-        // dd('dsdhakjsdhakjsd');
+      $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
+      $CompanyUUID = [];
+      if($companyIds){
+        $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
+      }  
+
         $chats = Chat::query()
             ->with('agent')
             ->with([
@@ -104,6 +110,7 @@ class AgentController extends Controller
             ])
             ->with('companyRel')
             ->where('last_message_at', '>=', now()->subHours(24))
+            ->whereIn('company_id', $CompanyUUID->toArray())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();
@@ -135,6 +142,12 @@ class AgentController extends Controller
         // if the client doesn't provide a cursor, default to a short lookback window
         $since ??= now()->subMinutes(2);
 
+        $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
+        $CompanyUUID = [];
+        if($companyIds){
+            $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
+        } 
+
         $chats = Chat::query()
             ->where('updated_at', '>', $since)
             ->with([
@@ -160,6 +173,7 @@ class AgentController extends Controller
                         });
                 },
             ])
+            ->whereIn('company_id', $CompanyUUID->toArray())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();

@@ -598,6 +598,7 @@ onMounted(() => {
         chats.value.unshift(e.chat)
         updateOnlineFlags()
       }
+      console.log(e,'first chat')
       subscribeToChat(e.chat.id)
     })
     .error((error) => console.error('Error subscribing to newChats channel:', error))
@@ -1402,17 +1403,17 @@ const isMessageReadByRecipient = (msg) => {
             </div>
           </div>
         </div>
-
         <!-- Chat items list Unassign chats -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div v-for="chat in filteredUnassignChats" :key="chat.id" @click="selectChat(chat)" :class="[
-              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-                selectedChat?.id === chat.id 
-                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
-                  : chat.unread_count > 0
-                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                    : 'hover:bg-slate-50'
-              ]">
+            'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+            selectedChat?.id === chat.id 
+            ? 'bg-indigo-50 ring-1 ring-indigo-200'
+            : chat.unread_count > 0
+            ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+            : 'hover:bg-slate-50'
+          ]">
+          {{ chat?.company_id }}
             <!-- Avatar -->
             <div class="relative flex-shrink-0">
               <div
