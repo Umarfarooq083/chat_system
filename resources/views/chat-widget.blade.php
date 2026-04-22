@@ -75,6 +75,7 @@
 (() => {
     const title = @json($title);
     const initialVisitorId = @json($visitorId);
+    const companyId = @json($companyId);
     const apiBase = '/api/widget';
     const messagesEl = document.getElementById('messages');
     const textEl = document.getElementById('text');
@@ -294,6 +295,7 @@
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                     visitor_id: visitorId,
+                    company_id: companyId,
                     current_url: document.referrer || null,
                     referrer_url: document.referrer || null,
                 }),
@@ -342,9 +344,11 @@
         if (!hasText && !hasFile) return;
         sendBtn.disabled = true;
         try {
+        console.log(document, 'umarfarooq');
             const formData = new FormData();
             formData.append('visitor_id', visitorId);
             formData.append('chat_id', chatId);
+            formData.append('company_id', companyId);
             if (hasText) formData.append('message', msg);
             if (hasFile) formData.append('attachments', attachedFile);
             formData.append('current_url', document.referrer || null);
@@ -389,6 +393,7 @@
             const formData = new FormData();
             formData.append('visitor_id', visitorId);
             formData.append('chat_id', chatId);
+            formData.append('company_id', companyId);
             formData.append('message', `Phone No: ${phone}\nCustomer Name: ${customerName}\nRegistration No: ${registrationNo}\nEmail: ${email}`);
             formData.append('message_type', 'user_info_response');
             formData.append('phone', phone);

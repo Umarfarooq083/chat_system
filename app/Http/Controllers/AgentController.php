@@ -10,6 +10,7 @@ use App\Models\ChatExternalApiFetch;
 use App\Models\ChatFeedback;
 use App\Models\Message;
 use App\Events\MessageSent;
+use App\Models\Company;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -77,6 +78,12 @@ class AgentController extends Controller
 
     public function index()
     {
+      $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
+      $CompanyUUID = [];
+      if($companyIds){
+        $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
+      }  
+
         $chats = Chat::query()
             ->with('agent')
             ->with([
@@ -101,7 +108,9 @@ class AgentController extends Controller
                         });
                 },
             ])
+            ->with('companyRel')
             ->where('last_message_at', '>=', now()->subHours(24))
+            ->whereIn('company_id', $CompanyUUID->toArray())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();
@@ -111,6 +120,7 @@ class AgentController extends Controller
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
             'auth_user' => auth()->user(),
+            'loginUserCompniesList' => $CompanyUUID,
             'pollCursor' => now()->toIso8601String(),
         ]);
     }
@@ -132,6 +142,12 @@ class AgentController extends Controller
 
         // if the client doesn't provide a cursor, default to a short lookback window
         $since ??= now()->subMinutes(2);
+
+        $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
+        $CompanyUUID = [];
+        if($companyIds){
+            $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
+        } 
 
         $chats = Chat::query()
             ->where('updated_at', '>', $since)
@@ -158,6 +174,7 @@ class AgentController extends Controller
                         });
                 },
             ])
+            ->whereIn('company_id', $CompanyUUID->toArray())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();
@@ -548,49 +565,58 @@ class AgentController extends Controller
             'to'   => 'nullable|date',
         ]);
 
+        $selectedCompany = $request->input('selectedCompany');
+
         $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::today()->startOfDay();
         $to   = isset($validated['to'])   ? Carbon::parse($validated['to'])->endOfDay()     : Carbon::today()->endOfDay();
-
-        // Ensure from is not after to
         if ($from->gt($to)) {
             [$from, $to] = [$to, $from];
         }
-    // dd(Carbon::now());
+        $company = Company::get();
+
         $stats = [
-            'total_visits' => Chat::whereBetween('created_at', [$from, $to])->count(),
-            'users_who_messaged' => Chat::whereBetween('created_at', [$from, $to])->whereHas('messages', function ($q) {
+            'total_visits' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->count(),
+            'users_who_messaged' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereHas('messages', function ($q) {
                 $q->where('sender_type', 'visitor');
             })->count(),
 
-            'active_chats_count' => Chat::whereBetween('created_at', [$from, $to])->where('status','open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
-            'unassigned_chats_count' => Chat::whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
-            'chats_by_status' => Chat::select('status', DB::raw('count(*) as count'))
+            'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status','open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
+            'chats_by_status' => Chat::byCompanyUuid($selectedCompany)->select('status', DB::raw('count(*) as count'))
                 ->whereBetween('created_at', [$from, $to])
                 ->groupBy('status')
                 ->get(),
-            'agent_concurrency' => DB::table('messages')
-                ->join('chats', 'messages.chat_id', '=', 'chats.id')
-                ->join('users as agents', 'chats.assigned_agent_id', '=', 'agents.id')
-                ->select(
-                    'chats.assigned_agent_id',
-                    'agents.name',
-                    DB::raw("
-                        COUNT(DISTINCT CASE 
-                            WHEN messages.sender_type = 'agent' 
-                            THEN chats.id 
-                        END) as agent_sent_users
-                    "),
-                    DB::raw("
-                        COUNT(DISTINCT CASE 
-                            WHEN messages.sender_type = 'visitor' 
-                            THEN chats.id 
-                        END) as user_replied_users
-                    ")
-                )
-                ->whereBetween('chats.created_at', [$from, $to])
-                ->whereNotNull('chats.assigned_agent_id')
-                ->groupBy('chats.assigned_agent_id', 'agents.name')
-                ->get(),
+            'agent_concurrency' => DB::table('chats')
+            ->join('users as agents', 'chats.assigned_agent_id', '=', 'agents.id')
+            ->join('companies', 'chats.company_id', '=', 'companies.uuid')
+            ->leftJoin('messages', 'messages.chat_id', '=', 'chats.id')
+
+            ->when($selectedCompany, function ($query) use ($selectedCompany) {
+                $query->where('companies.uuid', $selectedCompany);
+            })
+
+            ->whereBetween('chats.created_at', [$from, $to])
+            ->whereNotNull('chats.assigned_agent_id')
+
+            ->select(
+                'chats.assigned_agent_id',
+                'agents.name',
+                DB::raw("
+                    COUNT(DISTINCT CASE 
+                        WHEN messages.sender_type = 'agent' 
+                        THEN chats.id 
+                    END) as agent_sent_users
+                "),
+                DB::raw("
+                    COUNT(DISTINCT CASE 
+                        WHEN messages.sender_type = 'visitor' 
+                        THEN chats.id 
+                    END) as user_replied_users
+                ")
+            )
+
+            ->groupBy('chats.assigned_agent_id', 'agents.name')
+            ->get(),
         ];
 
         return Inertia::render('Agent/Reports', [
@@ -598,7 +624,9 @@ class AgentController extends Controller
             'filters' => [
                 'from' => $from->toDateString(),
                 'to'   => $to->toDateString(),
+                'selectedCompany'   => $request->input('selectedCompany', ''),
             ],
+            'company' => $company,
         ]);
     }
 

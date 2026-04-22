@@ -10,6 +10,7 @@
   const position = (scriptEl && scriptEl.dataset && scriptEl.dataset.position) || 'right';
   const title = (scriptEl && scriptEl.dataset && scriptEl.dataset.title) || 'Chat';
   const brandColor = (scriptEl && scriptEl.dataset && scriptEl.dataset.color) || '#111827';
+  const companyId = (scriptEl && scriptEl.dataset && scriptEl.dataset.companyId) || null;
 
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -33,6 +34,7 @@
   widgetUrl.searchParams.set('vid', visitorId);
   widgetUrl.searchParams.set('title', title);
   widgetUrl.searchParams.set('color', brandColor);
+  widgetUrl.searchParams.set('companyId', companyId);
 
   const root = document.createElement('div');
   root.id = 'chat-widget-root';

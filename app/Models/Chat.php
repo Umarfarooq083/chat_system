@@ -32,6 +32,7 @@ class Chat extends Model
         'last_message_at',
         'agent_last_read_at',
         'visitor_last_read_at',
+        'company_id',
     ];
 
     protected $casts = [
@@ -69,6 +70,11 @@ class Chat extends Model
     {
         return $this->hasOne(User::class, 'id', 'assigned_agent_id');
     }
+    
+    public function companyRel()
+    {
+        return $this->hasOne(Company::class, 'uuid', 'company_id');
+    }
 
     // Determine if visitor is currently online (active in last 2 minutes)
     public function getIsOnlineAttribute()
@@ -80,4 +86,14 @@ class Chat extends Model
         // Consider visitor online if they pinged within the last minute.
         return $this->last_activity->gt(now()->subSeconds(60));
     }
+
+    public function scopeByCompanyUuid($query, $uuid)
+    {
+        return $query->when($uuid, function ($q) use ($uuid) {
+            $q->whereHas('companyRel', function ($q2) use ($uuid) {
+                $q2->where('uuid', $uuid);
+            });
+        });
+    }
+
 }

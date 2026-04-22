@@ -21,6 +21,10 @@ const props = defineProps({
     type: Object,
     default: () => []
   },
+  loginUserCompniesList: {
+    type: Object,
+    default: () => []
+  },
   pollCursor: {
     type: String,
     default: null
@@ -598,6 +602,7 @@ onMounted(() => {
         chats.value.unshift(e.chat)
         updateOnlineFlags()
       }
+      console.log(e,'first chat')
       subscribeToChat(e.chat.id)
     })
     .error((error) => console.error('Error subscribing to newChats channel:', error))
@@ -727,6 +732,13 @@ const isMessageReadByRecipient = (msg) => {
   return agentReadTs !== null && messageTs <= agentReadTs
 }
 
+const filteredUnassignChatsByCompany = computed(() => {
+  return filteredUnassignChats.value.filter(chat =>
+    props.loginUserCompniesList.includes(chat.company_id)
+  )
+})
+
+
 </script>
 
 <template>
@@ -823,7 +835,7 @@ const isMessageReadByRecipient = (msg) => {
             </div> -->
           </div>
         </div>
-        
+        <!-- {{ chat?.company_rel?.color || '#cbd5e1' }} -->
         <!-- Chat items list recent chats -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div v-for="chat in filteredOpenChats" :key="chat.id" @click="selectChat(chat)" :class="[
@@ -834,14 +846,23 @@ const isMessageReadByRecipient = (msg) => {
                     ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
                     : 'hover:bg-slate-50'
               ]"> 
+              
             <!-- Avatar -->
             <div class="relative flex-shrink-0" >
-              <div :class="[
-                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
-                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 text-slate-500'
-              ]">
+              <div
+                :class="[
+                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
+                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                    ? 'text-white'
+                    : 'text-slate-500'
+                ]"
+                :style="{
+                  backgroundColor:
+                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                      ? (chat?.company_rel?.color || '#6366f1')
+                      : (chat?.company_rel?.color || '#cbd5e1')
+                }"
+              >
                 #{{ chat.id }}
               </div>
               <span :class="[
@@ -925,12 +946,20 @@ const isMessageReadByRecipient = (msg) => {
               ]"> 
             <!-- Avatar -->
             <div class="relative flex-shrink-0">
-              <div :class="[
-                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
-                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 text-slate-500'
-              ]">
+              <div
+                :class="[
+                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
+                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                    ? 'text-white'
+                    : 'text-slate-500'
+                ]"
+                :style="{
+                  backgroundColor:
+                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                      ? (chat?.company_rel?.color || '#6366f1')
+                      : (chat?.company_rel?.color || '#cbd5e1')
+                }"
+              >
                 #{{ chat.id }}
               </div>
               <span :class="[
@@ -1385,25 +1414,33 @@ const isMessageReadByRecipient = (msg) => {
             </div>
           </div>
         </div>
-
         <!-- Chat items list Unassign chats -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in filteredUnassignChats" :key="chat.id" @click="selectChat(chat)" :class="[
-              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-                selectedChat?.id === chat.id 
-                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
-                  : chat.unread_count > 0
-                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                    : 'hover:bg-slate-50'
-              ]">
+        <div class="flex-1 overflow-y-auto p-2 space-y-1" >
+          <div v-for="chat in filteredUnassignChatsByCompany" :key="chat.id" @click="selectChat(chat)" :class="[
+            'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+            selectedChat?.id === chat.id 
+            ? 'bg-indigo-50 ring-1 ring-indigo-200'
+            : chat.unread_count > 0
+            ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+            : 'hover:bg-slate-50'
+          ]">
+
             <!-- Avatar -->
             <div class="relative flex-shrink-0">
-              <div :class="[
-                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
-                selectedChat?.id === chat.id 
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 text-slate-500'
-              ]">
+              <div
+                :class="[
+                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
+                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                    ? 'text-white'
+                    : 'text-slate-500'
+                ]"
+                :style="{
+                  backgroundColor:
+                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                      ? (chat?.company_rel?.color || '#6366f1')
+                      : (chat?.company_rel?.color || '#cbd5e1')
+                }"
+              >
                 #{{ chat.id }}
               </div>
               <span :class="[
@@ -1478,12 +1515,20 @@ const isMessageReadByRecipient = (msg) => {
               ]">
            
             <div class="relative flex-shrink-0">
-              <div :class="[
-                'w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold font-mono',
-                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 text-slate-500'
-              ]">
+              <div
+                :class="[
+                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
+                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                    ? 'text-white'
+                    : 'text-slate-500'
+                ]"
+                :style="{
+                  backgroundColor:
+                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                      ? (chat?.company_rel?.color || '#6366f1')
+                      : (chat?.company_rel?.color || '#cbd5e1')
+                }"
+              >
                 #{{ chat.id }}
               </div>
               <span :class="[
