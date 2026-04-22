@@ -8,21 +8,26 @@ const props = defineProps({
         type: Object,
         required: true,
     },
+    company: {
+        type: Object,
+        required: true,
+    },
     filters: {
         type: Object,
-        default: () => ({ from: '', to: '' }),
+        default: () => ({ from: '', to: '' , selectedCompany: ''}),
     },
 });
 
 const fromDate = ref(props.filters.from || '');
 const toDate   = ref(props.filters.to   || '');
+const selectedCompany = ref(props.filters.selectedCompany || '');
 
 let debounceTimer = null;
 
 function applyFilters() {
     router.get(
         route('agent.reports'),
-        { from: fromDate.value, to: toDate.value },
+        { from: fromDate.value, to: toDate.value, selectedCompany: selectedCompany.value },
         { preserveState: true, replace: true }
     );
 }
@@ -31,6 +36,7 @@ function resetFilters() {
     const today = new Date().toISOString().slice(0, 10);
     fromDate.value = today;
     toDate.value   = today;
+    selectedCompany.value = '';
     applyFilters();
 }
 </script>
@@ -65,6 +71,15 @@ function resetFilters() {
                                 :min="fromDate || undefined"
                                 class="border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                             />
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Company</label>
+                            <select v-model="selectedCompany" class="border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="" class="text-sm text-gray-700">Select Company</option>
+                                <option v-for="comp in company" :key="comp.uuid" :value="comp.uuid" class="text-sm text-gray-700">
+                                    {{ comp.name }}
+                                </option>
+                            </select>
                         </div>
                         <div class="flex gap-2 pb-0.5">
                             <button

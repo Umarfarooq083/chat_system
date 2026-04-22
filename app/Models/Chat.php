@@ -86,4 +86,14 @@ class Chat extends Model
         // Consider visitor online if they pinged within the last minute.
         return $this->last_activity->gt(now()->subSeconds(60));
     }
+
+    public function scopeByCompanyUuid($query, $uuid)
+    {
+        return $query->when($uuid, function ($q) use ($uuid) {
+            $q->whereHas('companyRel', function ($q2) use ($uuid) {
+                $q2->where('uuid', $uuid);
+            });
+        });
+    }
+
 }

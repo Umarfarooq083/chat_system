@@ -21,6 +21,10 @@ const props = defineProps({
     type: Object,
     default: () => []
   },
+  loginUserCompniesList: {
+    type: Object,
+    default: () => []
+  },
   pollCursor: {
     type: String,
     default: null
@@ -728,6 +732,13 @@ const isMessageReadByRecipient = (msg) => {
   return agentReadTs !== null && messageTs <= agentReadTs
 }
 
+const filteredUnassignChatsByCompany = computed(() => {
+  return filteredUnassignChats.value.filter(chat =>
+    props.loginUserCompniesList.includes(chat.company_id)
+  )
+})
+
+
 </script>
 
 <template>
@@ -1404,8 +1415,8 @@ const isMessageReadByRecipient = (msg) => {
           </div>
         </div>
         <!-- Chat items list Unassign chats -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in filteredUnassignChats" :key="chat.id" @click="selectChat(chat)" :class="[
+        <div class="flex-1 overflow-y-auto p-2 space-y-1" >
+          <div v-for="chat in filteredUnassignChatsByCompany" :key="chat.id" @click="selectChat(chat)" :class="[
             'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
             selectedChat?.id === chat.id 
             ? 'bg-indigo-50 ring-1 ring-indigo-200'
@@ -1413,7 +1424,7 @@ const isMessageReadByRecipient = (msg) => {
             ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
             : 'hover:bg-slate-50'
           ]">
-          {{ chat?.company_id }}
+
             <!-- Avatar -->
             <div class="relative flex-shrink-0">
               <div
