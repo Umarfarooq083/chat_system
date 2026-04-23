@@ -1,16 +1,42 @@
 <script setup>
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { ref } from 'vue'
 
 const props = defineProps({
-    company: {
-        type: Object,
-        required: true,
-    },
-});
+    company: Object
+})
+
+const copied = ref(false)
+
+const embedCode = `
+<script
+    src="http://chat-system.test/chat-widget/embed.js"
+    data-chat-url="http://chat-system.test"
+    data-position="right"
+    data-title="Chat with us"
+    data-color="#111827"
+    data-company-id="${props.company.uuid}">
+<\/script>`
+
+const copyCode = async () => {
+    try {
+        await navigator.clipboard.writeText(embedCode)
+    } catch (e) {
+        const textarea = document.createElement('textarea')
+        textarea.value = embedCode
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+    }
+    copied.value = true
+    setTimeout(() => {
+        copied.value = false
+    }, 2000)
+}
 </script>
 
 <template>
+
     <Head title="Company Details" />
 
     <AuthenticatedLayout>
@@ -20,18 +46,13 @@ const props = defineProps({
                     Company Details
                 </h2>
                 <div class="flex gap-2">
-                    <Link
-                        :href="route('companies.index')"
-                        class="inline-flex items-center gap-1.5 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                        Back to Companies
+                    <Link :href="route('companies.index')"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Back to Companies
                     </Link>
-                    <Link
-                        v-if="company.name !== 'Default'"
-                        :href="route('companies.edit', company.id)"
-                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                        Edit Company
+                    <Link v-if="company.name !== 'Default'" :href="route('companies.edit', company.id)"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    Edit Company
                     </Link>
                 </div>
             </div>
@@ -79,5 +100,22 @@ const props = defineProps({
                 </div>
             </div>
         </div>
+
+         <div class="py-12">
+            <div class="max-w-3xl mx-auto sm:px-6 lg:px-8">
+                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
+                    <div class="p-6">
+                            <pre class="bg-gray-900 text-green-400 p-4 rounded-md text-sm overflow-x-auto">
+                            <code>{{ embedCode }}</code>
+                            </pre>
+
+                            <button @click="copyCode" class="mt-2 px-3 py-1 bg-indigo-600 text-white rounded">
+                                {{ copied ? 'Copied' : 'Copy' }}
+                            </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </AuthenticatedLayout>
 </template>
