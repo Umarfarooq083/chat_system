@@ -47,9 +47,6 @@ const showImageViewer = ref(false)
 const currentImageUrl = ref('')
 const currentImageName = ref('')
 
-
-
-
 let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -90,6 +87,8 @@ const cnicSubmitting = ref(false)
 const cnicResult = ref(null)
 const cnicError = ref('')
 
+const dismissedClosedChatId = ref(null)
+
 const openCnicModal = () => {
   cnicModalOpen.value = true
   cnicInput.value = ''
@@ -102,6 +101,12 @@ const closeCnicModal = () => {
   cnicModalOpen.value = false
   cnicSubmitting.value = false
   cnicError.value = ''
+}
+
+const dismissClosedOverlay = () => {
+  if (selectedChat.value) {
+    dismissedClosedChatId.value = selectedChat.value.id
+  }
 }
 
 const openImageViewer = (imageUrl, imageName = 'Image') => {
@@ -167,6 +172,13 @@ watch(() => props.chats, (newChats) => {
     chats.value = newChats
   }
 }, { immediate: true, deep: true })
+
+watch(selectedChat, (newChat, oldChat) => {
+  // Reset dismissed overlay when switching to a different chat
+  if (newChat?.id !== dismissedClosedChatId.value) {
+    dismissedClosedChatId.value = null
+  }
+})
 
 // const upsertChatFromPoll = (incoming) => {
 //   if (!incoming?.id) return
@@ -433,9 +445,11 @@ const onDragOver = (e) => {
   e.preventDefault()
   isDraggingOver.value = true
 }
+
 const onDragLeave = () => {
   isDraggingOver.value = false
 }
+
 const onDrop = (e) => {
   e.preventDefault()
   isDraggingOver.value = false
@@ -450,10 +464,6 @@ const getFileIcon = (file) => {
 
 const sendReply = async () => {
   if (!selectedChat.value) return
-  if (isPrechatPending.value) {
-    sendError.value = 'Waiting for visitor details (name & phone) before chatting.'
-    return
-  }
   const hasText = replyMessage.value.trim() !== ''
   const hasFiles = attachedFiles.value.length > 0
   if (!hasText && !hasFiles) return
@@ -1480,16 +1490,31 @@ const filteredUnassignChatsByCompany = computed(() => {
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
-              <div v-if="isPrechatPending"
+              <!-- Chat Closed Overlay -->
+              <div v-if="selectedChat?.status === 'close' && dismissedClosedChatId !== selectedChat.id" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10">
+                <div class="text-center">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-3 text-slate-400">
+                    <path d="M18 6 6 18" />
+                    <path d="M6 6l12 12" />
+                  </svg>
+                  <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
+                  <p class="text-xs text-slate-400 mt-1 mb-4">No further messages can be sent.</p>
+                  <button @click="dismissClosedOverlay" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium rounded-lg transition-colors">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+
+              <!-- <div v-if="isPrechatPending"
                 class="mr-3 text-xs text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-lg px-3 py-2">
                 Waiting for visitor name &amp; phone.
-              </div>
+              </div> -->
 
               <!-- Attach button -->
               <button type="button" @click="triggerFileInput" title="Attach files or Drag and drop here"
                 class="flex-shrink-0 flex items-center justify-center w-9 h-9 mr-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors border border-slate-200 hover:border-indigo-200"
-                :disabled="isPrechatPending"
-                :class="[attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '', isPrechatPending ? 'opacity-50 cursor-not-allowed' : '']">
+                :disabled="selectedChat?.status === 'close'"
+                :class="[attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                   stroke-linecap="round" stroke-linejoin="round">
                   <path
@@ -1503,13 +1528,13 @@ const filteredUnassignChatsByCompany = computed(() => {
 
               <!-- Text input -->
               <input v-model="replyMessage" type="text" placeholder="Type your reply…"
-                :disabled="isPrechatPending"
-                :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400', isPrechatPending ? 'opacity-50 cursor-not-allowed' : '']" />
+                :disabled="selectedChat?.status === 'close'"
+                :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']" />
 
               <!-- Send button -->
               <button type="submit"
-                :disabled="isPrechatPending"
-                :class="['flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-r-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer', isPrechatPending ? 'opacity-60 cursor-not-allowed' : '']">
+                :disabled="selectedChat?.status === 'close'"
+                :class="['flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-r-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer', (selectedChat?.status === 'close') ? 'opacity-60 cursor-not-allowed' : '']">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 12 3 3l18 9-18 9 3-9Z" />
                 </svg>

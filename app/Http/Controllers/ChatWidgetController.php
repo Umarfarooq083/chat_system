@@ -8,8 +8,8 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Message;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ChatWidgetController extends Controller
 {
@@ -49,7 +49,7 @@ class ChatWidgetController extends Controller
 
         $brandColor = $request->query('color');
         $brandColor = is_string($brandColor) ? trim($brandColor) : null;
-        if (!$brandColor || !preg_match('/^#([0-9a-f]{3}|[0-9a-f]{6})$/i', $brandColor)) {
+        if (! $brandColor || ! preg_match('/^#([0-9a-f]{3}|[0-9a-f]{6})$/i', $brandColor)) {
             $brandColor = (string) (config('chat.widget_brand_color') ?? '#111827');
         }
 
@@ -92,8 +92,8 @@ class ChatWidgetController extends Controller
         $this->createWelcomeMessageIfNeeded($chat);
 
         $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
-        $prechatRequired = $chat->prechat_submitted_at === null && $chat->user_info_submitted_at === null && !$hasBasicInfo;
-        if (!$prechatRequired && $chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+        $prechatRequired = $chat->prechat_submitted_at === null && $chat->user_info_submitted_at === null && ! $hasBasicInfo;
+        if (! $prechatRequired && $chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
             $chat->prechat_submitted_at = now();
             $chat->save();
         }
@@ -101,12 +101,12 @@ class ChatWidgetController extends Controller
         $currentUrl = $validated['current_url'] ?? null;
         $chat->last_activity = now();
         $chat->visitor_last_read_at = now();
-        if (!$chat->ip) {
+        if (! $chat->ip) {
             $chat->ip = $request->ip();
         }
         if ($currentUrl) {
             $chat->current_url = $currentUrl;
-        } elseif (!empty($validated['referrer_url'])) {
+        } elseif (! empty($validated['referrer_url'])) {
             $chat->current_url = $validated['referrer_url'];
         }
         $chat->save();
@@ -154,6 +154,14 @@ class ChatWidgetController extends Controller
         }
 
         $chat = Chat::findOrFail($validated['chat_id']);
+
+        // Prevent messaging on closed chats
+        if ($chat->status === 'close') {
+            return response()->json([
+                'message' => 'This chat has been closed. No further messages can be sent.',
+            ], 403);
+        }
+
         if ((string) $chat->visitor_id !== (string) $validated['visitor_id']) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
@@ -185,7 +193,7 @@ class ChatWidgetController extends Controller
             $phone = is_string($phone) ? trim($phone) : null;
             $customerName = is_string($customerName) ? trim($customerName) : null;
 
-            if (!$phone || !$customerName) {
+            if (! $phone || ! $customerName) {
                 return response()->json([
                     'message' => 'Name and phone number are required.',
                 ], 422);
@@ -209,7 +217,9 @@ class ChatWidgetController extends Controller
             $customerName = is_string($customerName) ? trim($customerName) : null;
             $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
             $email = is_string($email) ? trim($email) : null;
-            if ($email === '') $email = null;
+            if ($email === '') {
+                $email = null;
+            }
 
             if ($phone && $customerName && $registrationNo) {
                 $chat->phone = $phone;
@@ -224,7 +234,7 @@ class ChatWidgetController extends Controller
         }
 
         $messageText = trim($validated['message'] ?? '');
-        if ($messageText === '' && !$request->hasFile('attachments')) {
+        if ($messageText === '' && ! $request->hasFile('attachments')) {
             return response()->json(['message' => 'Message or attachment is required'], 422);
         }
 
@@ -239,8 +249,8 @@ class ChatWidgetController extends Controller
                 $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
                 $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
 
-                $fileName = (string) Str::uuid() . '.' . $ext;
-                $dir = 'chat-attachments/' . $chat->id;
+                $fileName = (string) Str::uuid().'.'.$ext;
+                $dir = 'chat-attachments/'.$chat->id;
                 $filePath = $uploaded->storeAs($dir, $fileName, 'public');
             }
         }
@@ -276,13 +286,13 @@ class ChatWidgetController extends Controller
         $chat->last_message_at = $message->created_at;
         $chat->last_activity = now();
         $chat->visitor_last_read_at = now();
-        if (!$chat->ip) {
+        if (! $chat->ip) {
             $chat->ip = $request->ip();
         }
         $currentUrl = $validated['current_url'] ?? null;
         if ($currentUrl) {
             $chat->current_url = $currentUrl;
-        } elseif (!empty($validated['referrer_url'])) {
+        } elseif (! empty($validated['referrer_url'])) {
             $chat->current_url = $validated['referrer_url'];
         }
         $chat->save();
@@ -389,13 +399,13 @@ class ChatWidgetController extends Controller
             'ip' => DB::raw("COALESCE(ip, '{$request->ip()}')"),
         ];
 
-        if (!empty($validated['current_url'])) {
+        if (! empty($validated['current_url'])) {
             $updates['current_url'] = $validated['current_url'];
         }
 
         Chat::where('id', $validated['chat_id'])->update($updates);
         $chat = Chat::find($validated['chat_id']);
-        
+
         try {
             broadcast(new \App\Events\ChatPing($chat));
         } catch (\Throwable $e) {

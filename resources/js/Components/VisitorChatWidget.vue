@@ -13,6 +13,7 @@ const messageContainer = ref(null)
 const showPrechatForm = ref(false)
 const showUserForm = ref(false)
 const sendError = ref('')
+const chatClosed = ref(false)
 const chatReadState = ref({
   agent_last_read_at: null,
   visitor_last_read_at: null,
@@ -334,6 +335,10 @@ const sendMessage = async () => {
   } catch (error) {
     console.error('Failed to send message:', error)
     sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
+    // Check if chat was closed
+    if (error?.response?.status === 403 && error?.response?.data?.message?.includes('closed')) {
+      chatClosed.value = true
+    }
     message.value = userMessage
     attachedFiles.value = tempFiles
   }
@@ -642,6 +647,18 @@ const cancelUserInfo = () => {
 
       <!-- Input area -->
       <div  class="border-t p-2">
+        <!-- Chat Closed Overlay -->
+        <div v-if="chatClosed" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
+          <div class="text-center">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400">
+              <path d="M18 6 6 18" />
+              <path d="M6 6l12 12" />
+            </svg>
+            <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
+            <p class="text-xs text-slate-400 mt-1">No further messages can be sent.</p>
+          </div>
+        </div>
+
         <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(item, index) in attachedFiles" :key="index"
             class="relative flex items-center gap-2 bg-gray-100 border border-gray-200 rounded px-2 py-1">
@@ -659,19 +676,19 @@ const cancelUserInfo = () => {
 
           <button type="button" @click="triggerFileInput" title="Attach file"
             class="w-20 rounded-5 border-1"
-            :disabled="showPrechatForm"
-            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm }">
+            :disabled="showPrechatForm || chatClosed"
+            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || chatClosed }">
             <i class="fa fa-paperclip"></i>
           </button>
 
           <input v-model="message" type="text" placeholder="Type a message..."
             class="form-control rounded-5"
-            :disabled="showPrechatForm" />
+            :disabled="showPrechatForm || chatClosed" />
 
           <button type="submit"
             class="btn btn-primary btn-sm rounded-5 px-3"
-            :disabled="showPrechatForm || (!message.trim() && !attachedFiles.length)"
-            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || (!message.trim() && !attachedFiles.length) }">
+            :disabled="showPrechatForm || chatClosed || (!message.trim() && !attachedFiles.length)"
+            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || chatClosed || (!message.trim() && !attachedFiles.length) }">
             Send
           </button>
         </form>
