@@ -102,6 +102,9 @@ class ChatController extends Controller
         $chat->registration_no = $registrationNo;
         $chat->email = $email;
         $chat->user_info_submitted_at = now();
+        if ($chat->prechat_submitted_at === null) {
+            $chat->prechat_submitted_at = now();
+        }
 
         // When the visitor submits a different registration number, any previously fetched
         // third-party data/PDF should be considered stale (so hide "Send PDF" until re-fetch).
@@ -113,6 +116,40 @@ class ChatController extends Controller
             $chat->external_api_fetched_at = null;
             $chat->external_api_pdf_sent_at = null;
         }
+    }
+
+    private function applyVisitorPrechatInfoToChat(Request $request, Chat $chat): void
+    {
+        if ($request->input('message_type') !== 'prechat_info_response' || $request->input('sender_type') !== 'visitor') {
+            return;
+        }
+
+        $phone = $request->input('phone');
+        $customerName = $request->input('customer_name');
+        $message = (string) ($request->input('message') ?? '');
+
+        $phone = is_string($phone) ? trim($phone) : null;
+        $customerName = is_string($customerName) ? trim($customerName) : null;
+
+        if ((!$phone || !$customerName) && $message !== '') {
+            $decoded = json_decode($message, true);
+            if (is_array($decoded)) {
+                $phone = $phone ?: (is_string($decoded['phone'] ?? null) ? trim($decoded['phone']) : null);
+                $customerName = $customerName ?: (is_string($decoded['name'] ?? null) ? trim($decoded['name']) : null);
+            }
+        }
+
+        if (!$phone || !$customerName) {
+            return;
+        }
+
+        if (strlen($phone) > 50 || strlen($customerName) > 255) {
+            return;
+        }
+
+        $chat->phone = $phone;
+        $chat->customer_name = $customerName;
+        $chat->prechat_submitted_at = now();
     }
 
     private function resolveCurrentUrl(Request $request): ?string
@@ -144,6 +181,25 @@ class ChatController extends Controller
 
         try {
             $chat = Chat::find($request->chat_id);
+            $messageType = is_string($request->input('message_type')) ? trim((string) $request->input('message_type')) : null;
+
+            $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+            if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+                $chat->prechat_submitted_at = now();
+            }
+
+            if ($chat->prechat_submitted_at === null) {
+                if ($request->sender_type === 'visitor' && $messageType !== 'prechat_info_response') {
+                    return response()->json([
+                        'message' => 'Please provide your name and phone number to start chatting.',
+                    ], 409);
+                }
+                if ($request->sender_type === 'agent' && $messageType !== 'prechat_info_request') {
+                    return response()->json([
+                        'message' => 'Waiting for visitor details (name & phone) before chatting.',
+                    ], 409);
+                }
+            }
 
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
@@ -151,6 +207,7 @@ class ChatController extends Controller
                 broadcast(new \App\Events\ChatPing($chat));
             }
 
+            $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = [];
@@ -162,6 +219,12 @@ class ChatController extends Controller
                     'email' => $request->email,
                     'phone' => $request->phone,
                     'registration_no' => $request->registration_no,
+                ];
+            }elseif ($request->message_type == 'prechat_info_response') {
+                $chat_message = [
+                    'type' => 'prechat_info_response',
+                    'name' => $request->customer_name,
+                    'phone' => $request->phone,
                 ];
             }else{
                 $chat_message = $request->message;
@@ -315,6 +378,10 @@ class ChatController extends Controller
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat, config('chat.welcome_message'));
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
 
         if (!$chat->ip) {
             $chat->ip = $request->ip();
@@ -353,6 +420,10 @@ class ChatController extends Controller
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat, config('chat.welcome_message'));
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
         // mark visitor active
         $chat->last_activity = now();
         if (!$chat->ip) {
@@ -387,6 +458,10 @@ class ChatController extends Controller
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat, config('chat.widget_welcome_message'));
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
         if (!$chat->ip) {
             $chat->ip = $request->ip();
         }
@@ -425,12 +500,33 @@ class ChatController extends Controller
 
         try {
             $chat = Chat::find($request->chat_id);
+
+            $messageType = is_string($request->input('message_type')) ? trim((string) $request->input('message_type')) : null;
+            $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+            if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+                $chat->prechat_submitted_at = now();
+            }
+
+            if ($chat->prechat_submitted_at === null) {
+                if ($request->sender_type === 'visitor' && $messageType !== 'prechat_info_response') {
+                    return response()->json([
+                        'message' => 'Please provide your name and phone number to start chatting.',
+                    ], 409);
+                }
+                if ($request->sender_type === 'agent' && $messageType !== 'prechat_info_request') {
+                    return response()->json([
+                        'message' => 'Waiting for visitor details (name & phone) before chatting.',
+                    ], 409);
+                }
+            }
+
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
                 $chat->visitor_last_read_at = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
 
+            $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = '';

@@ -91,6 +91,13 @@ class ChatWidgetController extends Controller
         );
         $this->createWelcomeMessageIfNeeded($chat);
 
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        $prechatRequired = $chat->prechat_submitted_at === null && $chat->user_info_submitted_at === null && !$hasBasicInfo;
+        if (!$prechatRequired && $chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+            $chat->save();
+        }
+
         $currentUrl = $validated['current_url'] ?? null;
         $chat->last_activity = now();
         $chat->visitor_last_read_at = now();
@@ -118,6 +125,8 @@ class ChatWidgetController extends Controller
                 'visitor_id' => $chat->visitor_id,
                 'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
                 'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
+                'prechat_submitted_at' => optional($chat->prechat_submitted_at)->toIso8601String(),
+                'prechat_required' => $prechatRequired,
             ],
             'messages' => $messages->map(fn (Message $m) => $this->serializeMessage($m))->values(),
         ]);
@@ -154,8 +163,43 @@ class ChatWidgetController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $messageType = (string) ($validated['message_type'] ?? '');
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+            $chat->save();
+        }
+
+        // Block chatting until pre-chat info is submitted (except for the pre-chat submission itself)
+        if ($chat->prechat_submitted_at === null && $messageType !== 'prechat_info_response') {
+            return response()->json([
+                'message' => 'Please provide your name and phone number to start chatting.',
+            ], 409);
+        }
+
+        // Apply pre-chat info if it's a prechat_info_response
+        if ($messageType === 'prechat_info_response') {
+            $phone = $request->input('phone');
+            $customerName = $request->input('customer_name');
+
+            $phone = is_string($phone) ? trim($phone) : null;
+            $customerName = is_string($customerName) ? trim($customerName) : null;
+
+            if (!$phone || !$customerName) {
+                return response()->json([
+                    'message' => 'Name and phone number are required.',
+                ], 422);
+            }
+
+            $chat->phone = $phone;
+            $chat->customer_name = $customerName;
+            if ($chat->prechat_submitted_at === null) {
+                $chat->prechat_submitted_at = now();
+            }
+        }
+
         // Apply user info if it's a user_info_response
-        if ($request->input('message_type') === 'user_info_response' && $request->input('sender_type') === 'visitor') {
+        if ($messageType === 'user_info_response') {
             $phone = $request->input('phone');
             $customerName = $request->input('customer_name');
             $registrationNo = $request->input('registration_no');
@@ -173,6 +217,9 @@ class ChatWidgetController extends Controller
                 $chat->registration_no = $registrationNo;
                 $chat->email = $email;
                 $chat->user_info_submitted_at = now();
+                if ($chat->prechat_submitted_at === null) {
+                    $chat->prechat_submitted_at = now();
+                }
             }
         }
 
@@ -200,13 +247,19 @@ class ChatWidgetController extends Controller
 
         $chat_message = [];
 
-        if ($request->message_type == 'user_info_response') {
+        if ($messageType === 'user_info_response') {
             $chat_message = [
                 'type' => 'user_info_response',
                 'name' => $request->customer_name,
                 'email' => $request->email,
                 'phone' => $request->phone,
                 'registration_no' => $request->registration_no,
+            ];
+        } elseif ($messageType === 'prechat_info_response') {
+            $chat_message = [
+                'type' => 'prechat_info_response',
+                'name' => $request->customer_name,
+                'phone' => $request->phone,
             ];
         } else {
             $chat_message = $messageText;
@@ -216,7 +269,7 @@ class ChatWidgetController extends Controller
             'chat_id' => $chat->id,
             'sender_type' => 'visitor',
             'message' => is_array($chat_message) ? json_encode($chat_message) : $chat_message,
-            'message_type' => $validated['message_type'] ?? null,
+            'message_type' => $messageType !== '' ? $messageType : null,
             'attachments' => $filePath,
         ]);
 
