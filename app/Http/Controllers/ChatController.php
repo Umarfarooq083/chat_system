@@ -265,6 +265,17 @@ class ChatController extends Controller
 
             // keep chat list ordering consistent
             $chat->last_message_at = $message->created_at;
+            if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
+                $chat->first_visitor_message_at = $message->created_at;
+            }
+            if (
+                $request->sender_type === 'agent'
+                && $chat->first_agent_reply_at === null
+                && $chat->first_visitor_message_at !== null
+                && $message->created_at->gt($chat->first_visitor_message_at)
+            ) {
+                $chat->first_agent_reply_at = $message->created_at;
+            }
             if (! $chat->ip) {
                 $chat->ip = $request->ip();
             }
@@ -567,6 +578,17 @@ class ChatController extends Controller
             ]);
 
             $chat->last_message_at = $message->created_at;
+            if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
+                $chat->first_visitor_message_at = $message->created_at;
+            }
+            if (
+                $request->sender_type === 'agent'
+                && $chat->first_agent_reply_at === null
+                && $chat->first_visitor_message_at !== null
+                && $message->created_at->gt($chat->first_visitor_message_at)
+            ) {
+                $chat->first_agent_reply_at = $message->created_at;
+            }
             if (! $chat->ip) {
                 $chat->ip = $request->ip();
             }

@@ -577,8 +577,8 @@ const cancelUserInfo = () => {
             />
           </div>
           <div class="col-md-12 mt-2">
-            <div class="row gap-2 m-0 justify-content-end">
-              <button type="submit" class="btn btn-primary btn-sm w-25">
+            <div class="row gap-2 m-0 justify-content-center">
+              <button type="submit" class="btn btn-primary btn-sm w-50">
                 Start Chat
               </button>
             </div>
