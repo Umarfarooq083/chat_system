@@ -42,6 +42,11 @@ const externalHtmlSending = ref(false)
 const markingRead = ref(new Set())
 const subscribedChatIds = new Set()
 const pollCursor = ref(props.pollCursor)
+
+const showImageViewer = ref(false)
+const currentImageUrl = ref('')
+const currentImageName = ref('')
+
 let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -63,11 +68,26 @@ const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const isDraggingOver = ref(false)
 
+const isPrechatPending = computed(() => {
+  const chat = selectedChat.value
+  if (!chat) return false
+  if (chat.prechat_submitted_at) return false
+
+  const phone = (chat.phone || '').toString().trim()
+  const name = (chat.customer_name || '').toString().trim()
+  const hasBasicInfo = !!phone && !!name
+  if (chat.user_info_submitted_at || hasBasicInfo) return false
+
+  return true
+})
+
 const cnicModalOpen = ref(false)
 const cnicInput = ref('')
 const cnicSubmitting = ref(false)
 const cnicResult = ref(null)
 const cnicError = ref('')
+
+const dismissedClosedChatId = ref(null)
 
 const openCnicModal = () => {
   cnicModalOpen.value = true
@@ -81,6 +101,24 @@ const closeCnicModal = () => {
   cnicModalOpen.value = false
   cnicSubmitting.value = false
   cnicError.value = ''
+}
+
+const dismissClosedOverlay = () => {
+  if (selectedChat.value) {
+    dismissedClosedChatId.value = selectedChat.value.id
+  }
+}
+
+const openImageViewer = (imageUrl, imageName = 'Image') => {
+  currentImageUrl.value = imageUrl
+  currentImageName.value = imageName
+  showImageViewer.value = true
+}
+
+const closeImageViewer = () => {
+  showImageViewer.value = false
+  currentImageUrl.value = ''
+  currentImageName.value = ''
 }
 
 const submitCnicLookup = async () => {
@@ -134,6 +172,13 @@ watch(() => props.chats, (newChats) => {
     chats.value = newChats
   }
 }, { immediate: true, deep: true })
+
+watch(selectedChat, (newChat, oldChat) => {
+  // Reset dismissed overlay when switching to a different chat
+  if (newChat?.id !== dismissedClosedChatId.value) {
+    dismissedClosedChatId.value = null
+  }
+})
 
 // const upsertChatFromPoll = (incoming) => {
 //   if (!incoming?.id) return
@@ -400,9 +445,11 @@ const onDragOver = (e) => {
   e.preventDefault()
   isDraggingOver.value = true
 }
+
 const onDragLeave = () => {
   isDraggingOver.value = false
 }
+
 const onDrop = (e) => {
   e.preventDefault()
   isDraggingOver.value = false
@@ -820,6 +867,57 @@ const filteredUnassignChatsByCompany = computed(() => {
       </div>
     </Modal>
 
+    <!-- Image Viewer Modal -->
+    <Modal :show="showImageViewer" @close="closeImageViewer" max-width="max-w-4xl" >
+      <div class="relative">
+        <!-- Header -->
+        <div class="flex items-center justify-between p-2 border-b border-slate-200">
+          
+          <button 
+            @click="closeImageViewer" 
+            class="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        
+        <!-- Image Content -->
+        <div class="p-4 flex items-center justify-center bg-gray-900 bg-opacity-95">
+          <img 
+            :src="currentImageUrl" 
+            :alt="currentImageName"
+            class="max-w-full max-h-[80vh] object-contain rounded-lg"
+          />
+        </div>
+        
+        <div class="flex justify-end gap-3 p-2 border-t border-slate-200 bg-white">
+          <a 
+            :href="currentImageUrl" 
+            :download="currentImageName"
+            target="_blank"
+            rel="noopener"
+            class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download
+          </a>
+          <button 
+            @click="closeImageViewer"
+            class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
       style="height: calc(100vh - 85px);">
       <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
@@ -873,12 +971,15 @@ const filteredUnassignChatsByCompany = computed(() => {
                 class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
               </span>
             </div>
-
+          <!-- {{chat.latest_message}} -->
             <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12" >
               <div class="flex items-center gap-2 mb-0.5">
-                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat #{{ chat.id }} 
+                <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat: {{chat?.customer_name }}
+                </span>
+                <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat # {{ chat.id }}
                 </span>
                 <span v-if="chat.unread_count > 0"
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
@@ -890,9 +991,14 @@ const filteredUnassignChatsByCompany = computed(() => {
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
                 {{ getUserInfo(chat?.latest_message?.message) }}
               </p>
+              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1" >
+                {{chat?.customer_name}}
+                <!-- {{ getUserInfo(chat?.latest_message?.message) }} -->
+              </p>
               <p class="text-xs text-slate-500 truncate mb-1" v-else>
                 {{ chat?.latest_message?.message || 'No messages' }}
               </p>
+              
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
@@ -974,8 +1080,11 @@ const filteredUnassignChatsByCompany = computed(() => {
             <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12" >
               <div class="flex items-center gap-2 mb-0.5">
-                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat #{{ chat.id }}
+               <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat: {{chat?.customer_name }}
+                </span>
+                <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat # {{ chat.id }}
                 </span>
                 <span v-if="chat.unread_count > 0"
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
@@ -983,12 +1092,18 @@ const filteredUnassignChatsByCompany = computed(() => {
                   {{ chat.unread_count }}
                 </span>
               </div>
-              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
-                {{ getUserInfo(chat?.latest_message?.message) }}
+
+             <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+               {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1" >
+                {{chat?.customer_name}}
+                <!-- {{ getUserInfo(chat?.latest_message?.message) }} -->
               </p>
               <p class="text-xs text-slate-500 truncate mb-1" v-else>
                 {{ chat?.latest_message?.message || 'No messages' }}
               </p>
+
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
@@ -1158,7 +1273,25 @@ const filteredUnassignChatsByCompany = computed(() => {
               :class="['flex', msg.sender_type === 'agent' ? 'justify-end' : 'justify-start']">
               <!-- User Info Request -->
 
-              <div v-if="msg.message_type === 'user_info_request'"
+              <div v-if="msg.message_type === 'prechat_info_request'"
+                class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
+                <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
+                  Visitor Details Form Requested
+                </div>
+              </div>
+
+              <div v-else-if="msg.message_type === 'prechat_info_response'"
+                class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
+                  <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
+                    Visitor Details Received:
+                  </div>
+                  <div class="text-xs text-cyan-800 space-y-1">
+                    <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                    <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                  </div>
+              </div>
+
+              <div v-else-if="msg.message_type === 'user_info_request'"
                 class="max-w-sm bg-blue-50 border border-blue-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-blue-700 mb-1.5 flex items-center gap-1.5">
                   <span>📋</span> User Information Form Request Sent
@@ -1240,17 +1373,23 @@ const filteredUnassignChatsByCompany = computed(() => {
                 /> -->
               </div>
 
-           
-
               <!-- Message with attachments -->
               <div v-else class="flex flex-col gap-1.5"
                 :class="msg.sender_type === 'agent' ? 'items-end' : 'items-start'">
 
                 <template v-if="msg.attachment_view_url">
-                  <img v-if="msg.attachment_is_image" :src="msg.attachment_view_url"
+                  <!-- <img v-if="msg.attachment_is_image" :src="msg.attachment_view_url"
                     :alt="msg.attachment_name || 'Attachment'"
                     class="max-w-xs max-h-48 rounded-xl border border-slate-200 object-cover shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
-                    @click="window.open(msg.attachment_view_url, '_blank')" />
+                    @click="window.open(msg.attachment_view_url, '_blank')" /> -->
+                    <img 
+                      v-if="msg.attachment_is_image" 
+                      :src="msg.attachment_view_url"
+                      :alt="msg.attachment_name || 'Attachment'"
+                      class="max-w-xs max-h-48 rounded-xl border border-slate-200 object-cover shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
+                      @click="openImageViewer(msg.attachment_view_url, msg.attachment_name)"
+                    />
+
 
                   <a v-else :href="msg.attachment_download_url || msg.attachment_view_url"
                     :download="msg.attachment_name" :class="[
@@ -1351,10 +1490,31 @@ const filteredUnassignChatsByCompany = computed(() => {
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
+              <!-- Chat Closed Overlay -->
+              <div v-if="selectedChat?.status === 'close' && dismissedClosedChatId !== selectedChat.id" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10">
+                <div class="text-center">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-3 text-slate-400">
+                    <path d="M18 6 6 18" />
+                    <path d="M6 6l12 12" />
+                  </svg>
+                  <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
+                  <p class="text-xs text-slate-400 mt-1 mb-4">No further messages can be sent.</p>
+                  <button @click="dismissClosedOverlay" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium rounded-lg transition-colors">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+
+              <!-- <div v-if="isPrechatPending"
+                class="mr-3 text-xs text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-lg px-3 py-2">
+                Waiting for visitor name &amp; phone.
+              </div> -->
+
               <!-- Attach button -->
-              <button type="button" @click="triggerFileInput" title="Attach files"
+              <button type="button" @click="triggerFileInput" title="Attach files or Drag and drop here"
                 class="flex-shrink-0 flex items-center justify-center w-9 h-9 mr-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors border border-slate-200 hover:border-indigo-200"
-                :class="attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : ''">
+                :disabled="selectedChat?.status === 'close'"
+                :class="[attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                   stroke-linecap="round" stroke-linejoin="round">
                   <path
@@ -1368,11 +1528,13 @@ const filteredUnassignChatsByCompany = computed(() => {
 
               <!-- Text input -->
               <input v-model="replyMessage" type="text" placeholder="Type your reply…"
-                class="flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400" />
+                :disabled="selectedChat?.status === 'close'"
+                :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']" />
 
               <!-- Send button -->
               <button type="submit"
-                class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-r-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer">
+                :disabled="selectedChat?.status === 'close'"
+                :class="['flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-r-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer', (selectedChat?.status === 'close') ? 'opacity-60 cursor-not-allowed' : '']">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 12 3 3l18 9-18 9 3-9Z" />
                 </svg>
@@ -1464,12 +1626,20 @@ const filteredUnassignChatsByCompany = computed(() => {
                   {{ chat.unread_count }}
                 </span>
               </div>
+           
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
-                {{ getUserInfo(chat?.latest_message?.message) }}
+               {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1" >
+                {{chat?.customer_name}}
+                <!-- {{ getUserInfo(chat?.latest_message?.message) }} -->
               </p>
               <p class="text-xs text-slate-500 truncate mb-1" v-else>
                 {{ chat?.latest_message?.message || 'No messages' }}
               </p>
+
+
+
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
@@ -1542,8 +1712,11 @@ const filteredUnassignChatsByCompany = computed(() => {
 
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
-                <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat #{{ chat.id }}
+                <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat: {{chat?.customer_name }}
+                </span>
+                <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat # {{ chat.id }}
                 </span>
                 <span v-if="chat.unread_count > 0"
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"

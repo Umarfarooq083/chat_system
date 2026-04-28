@@ -48,17 +48,19 @@ class ChatController extends Controller
     private function canVisitorAccessChat(Chat $chat): bool
     {
         $visitorId = session('visitor_id');
+
         return is_string($visitorId) && $visitorId !== '' && $chat->visitor_id === $visitorId;
     }
 
     private function extractUserInfoFieldFromMessage(string $message, string $label): ?string
     {
-        $pattern = '/^' . preg_quote($label, '/') . '\\s*:\\s*(.+)\\s*$/mi';
+        $pattern = '/^'.preg_quote($label, '/').'\\s*:\\s*(.+)\\s*$/mi';
         if (preg_match($pattern, $message, $matches) !== 1) {
             return null;
         }
 
         $value = trim((string) ($matches[1] ?? ''));
+
         return $value !== '' ? $value : null;
     }
 
@@ -81,9 +83,11 @@ class ChatController extends Controller
         $customerName = is_string($customerName) ? trim($customerName) : null;
         $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
         $email = is_string($email) ? trim($email) : null;
-        if ($email === '') $email = null;
+        if ($email === '') {
+            $email = null;
+        }
 
-        if (!$phone || !$customerName || !$registrationNo) {
+        if (! $phone || ! $customerName || ! $registrationNo) {
             return;
         }
 
@@ -102,6 +106,9 @@ class ChatController extends Controller
         $chat->registration_no = $registrationNo;
         $chat->email = $email;
         $chat->user_info_submitted_at = now();
+        if ($chat->prechat_submitted_at === null) {
+            $chat->prechat_submitted_at = now();
+        }
 
         // When the visitor submits a different registration number, any previously fetched
         // third-party data/PDF should be considered stale (so hide "Send PDF" until re-fetch).
@@ -115,15 +122,50 @@ class ChatController extends Controller
         }
     }
 
+    private function applyVisitorPrechatInfoToChat(Request $request, Chat $chat): void
+    {
+        if ($request->input('message_type') !== 'prechat_info_response' || $request->input('sender_type') !== 'visitor') {
+            return;
+        }
+
+        $phone = $request->input('phone');
+        $customerName = $request->input('customer_name');
+        $message = (string) ($request->input('message') ?? '');
+
+        $phone = is_string($phone) ? trim($phone) : null;
+        $customerName = is_string($customerName) ? trim($customerName) : null;
+
+        if ((! $phone || ! $customerName) && $message !== '') {
+            $decoded = json_decode($message, true);
+            if (is_array($decoded)) {
+                $phone = $phone ?: (is_string($decoded['phone'] ?? null) ? trim($decoded['phone']) : null);
+                $customerName = $customerName ?: (is_string($decoded['name'] ?? null) ? trim($decoded['name']) : null);
+            }
+        }
+
+        if (! $phone || ! $customerName) {
+            return;
+        }
+
+        if (strlen($phone) > 50 || strlen($customerName) > 255) {
+            return;
+        }
+
+        $chat->phone = $phone;
+        $chat->customer_name = $customerName;
+        $chat->prechat_submitted_at = now();
+    }
+
     private function resolveCurrentUrl(Request $request): ?string
     {
         $url = $request->input('current_url') ?: $request->header('referer');
-        if (!$url) {
+        if (! $url) {
             return null;
         }
         if (is_string($url) && strlen($url) > 2048) {
             return substr($url, 0, 2048);
         }
+
         return is_string($url) ? $url : null;
     }
 
@@ -145,12 +187,35 @@ class ChatController extends Controller
         try {
             $chat = Chat::find($request->chat_id);
 
+            // Prevent messaging on closed chats
+            if ($chat->status === 'close') {
+                return response()->json([
+                    'message' => 'This chat has been closed. No further messages can be sent.',
+                ], 403);
+            }
+
+            $messageType = is_string($request->input('message_type')) ? trim((string) $request->input('message_type')) : null;
+
+            $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+            if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+                $chat->prechat_submitted_at = now();
+            }
+
+            if ($chat->prechat_submitted_at === null) {
+                if ($request->sender_type === 'visitor' && $messageType !== 'prechat_info_response') {
+                    return response()->json([
+                        'message' => 'Please provide your name and phone number to start chatting.',
+                    ], 409);
+                }
+            }
+
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
                 $chat->visitor_last_read_at = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
 
+            $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = [];
@@ -163,7 +228,13 @@ class ChatController extends Controller
                     'phone' => $request->phone,
                     'registration_no' => $request->registration_no,
                 ];
-            }else{
+            } elseif ($request->message_type == 'prechat_info_response') {
+                $chat_message = [
+                    'type' => 'prechat_info_response',
+                    'name' => $request->customer_name,
+                    'phone' => $request->phone,
+                ];
+            } else {
                 $chat_message = $request->message;
             }
             // dd($chat_message);
@@ -178,8 +249,8 @@ class ChatController extends Controller
                     $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
                     $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
 
-                    $fileName = (string) Str::uuid() . '.' . $ext;
-                    $dir = 'chat-attachments/' . $chat->id;
+                    $fileName = (string) Str::uuid().'.'.$ext;
+                    $dir = 'chat-attachments/'.$chat->id;
                     $filePath = $uploaded->storeAs($dir, $fileName, 'public');
                 }
             }
@@ -194,7 +265,7 @@ class ChatController extends Controller
 
             // keep chat list ordering consistent
             $chat->last_message_at = $message->created_at;
-            if (!$chat->ip) {
+            if (! $chat->ip) {
                 $chat->ip = $request->ip();
             }
             $currentUrl = $this->resolveCurrentUrl($request);
@@ -245,12 +316,12 @@ class ChatController extends Controller
         }
 
         $visitorId = session('visitor_id');
-        if (!$visitorId) {
+        if (! $visitorId) {
             abort(403);
         }
 
         $message->loadMissing('chat');
-        if (!$message->chat || $message->chat->visitor_id !== $visitorId) {
+        if (! $message->chat || $message->chat->visitor_id !== $visitorId) {
             abort(403);
         }
     }
@@ -259,12 +330,12 @@ class ChatController extends Controller
     {
         $this->assertCanAccessAttachment($request, $message);
 
-        if (!$message->attachments) {
+        if (! $message->attachments) {
             abort(404);
         }
 
         $disk = Storage::disk('public');
-        if (!$disk->exists($message->attachments)) {
+        if (! $disk->exists($message->attachments)) {
             abort(404);
         }
         $path = $disk->path($message->attachments);
@@ -282,12 +353,12 @@ class ChatController extends Controller
     {
         $this->assertCanAccessAttachment($request, $message);
 
-        if (!$message->attachments) {
+        if (! $message->attachments) {
             abort(404);
         }
 
         $disk = Storage::disk('public');
-        if (!$disk->exists($message->attachments)) {
+        if (! $disk->exists($message->attachments)) {
             abort(404);
         }
 
@@ -303,7 +374,7 @@ class ChatController extends Controller
         $visitorId = session()->get('visitor_id', Str::uuid());
         session()->put('visitor_id', $visitorId);
         $Company = Company::where('name', 'Default')->first();
-        
+
         $chat = Chat::firstOrCreate(
             ['visitor_id' => $visitorId],
             [
@@ -315,8 +386,12 @@ class ChatController extends Controller
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat, config('chat.welcome_message'));
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
 
-        if (!$chat->ip) {
+        if (! $chat->ip) {
             $chat->ip = $request->ip();
         }
         $currentUrl = $this->resolveCurrentUrl($request);
@@ -333,9 +408,10 @@ class ChatController extends Controller
         } catch (\Throwable $e) {
             report($e);
         }
+
         return response()->json([
             'chat' => $chat,
-            'messages' => $messages
+            'messages' => $messages,
         ]);
     }
 
@@ -353,9 +429,13 @@ class ChatController extends Controller
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat, config('chat.welcome_message'));
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
         // mark visitor active
         $chat->last_activity = now();
-        if (!$chat->ip) {
+        if (! $chat->ip) {
             $chat->ip = request()->ip();
         }
         $currentUrl = $this->resolveCurrentUrl(request());
@@ -365,6 +445,7 @@ class ChatController extends Controller
         $chat->save();
 
         $messages = $chat->messages()->get();
+
         return Inertia::render('VisitorChat', [
             'chat' => $chat,
             'messages' => $messages,
@@ -387,7 +468,11 @@ class ChatController extends Controller
             ]
         );
         $this->createWelcomeMessageIfNeeded($chat, config('chat.widget_welcome_message'));
-        if (!$chat->ip) {
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
+        if (! $chat->ip) {
             $chat->ip = $request->ip();
         }
         $currentUrl = $this->resolveCurrentUrl($request);
@@ -404,10 +489,10 @@ class ChatController extends Controller
         } catch (\Throwable $e) {
             report($e);
         }
-    
+
         return response()->json(['chat' => $chat, 'messages' => $messages]);
     }
-    
+
     public function externalSendMessage(Request $request)
     {
         $request->validate([
@@ -425,12 +510,34 @@ class ChatController extends Controller
 
         try {
             $chat = Chat::find($request->chat_id);
+
+            // Prevent messaging on closed chats
+            if ($chat->status === 'close') {
+                return response()->json([
+                    'message' => 'This chat has been closed. No further messages can be sent.',
+                ], 403);
+            }
+
+            $messageType = is_string($request->input('message_type')) ? trim((string) $request->input('message_type')) : null;
+            $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+            if ($chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+                $chat->prechat_submitted_at = now();
+            }
+
+            // Block chatting until pre-chat info is submitted (except for the pre-chat submission itself)
+            if ($chat->prechat_submitted_at === null && $messageType !== 'prechat_info_response') {
+                return response()->json([
+                    'message' => 'Please provide your name and phone number to start chatting.',
+                ], 409);
+            }
+
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
                 $chat->visitor_last_read_at = now();
                 broadcast(new \App\Events\ChatPing($chat));
             }
 
+            $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = '';
@@ -445,8 +552,8 @@ class ChatController extends Controller
                     $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
                     $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
 
-                    $fileName = (string) Str::uuid() . '.' . $ext;
-                    $dir = 'chat-attachments/' . $chat->id;
+                    $fileName = (string) Str::uuid().'.'.$ext;
+                    $dir = 'chat-attachments/'.$chat->id;
                     $filePath = $uploaded->storeAs($dir, $fileName, 'public');
                 }
             }
@@ -460,7 +567,7 @@ class ChatController extends Controller
             ]);
 
             $chat->last_message_at = $message->created_at;
-            if (!$chat->ip) {
+            if (! $chat->ip) {
                 $chat->ip = $request->ip();
             }
             $currentUrl = $this->resolveCurrentUrl($request);
@@ -476,6 +583,7 @@ class ChatController extends Controller
             if ($request->sender_type === 'agent') {
                 $this->broadcastReadUpdate($chat, 'agent');
             }
+
             return response()->noContent();
         } catch (\Throwable $e) {
             report($e);
@@ -509,11 +617,10 @@ class ChatController extends Controller
     //     return response()->json(['status' => 'ok']);
     // }
 
-
     public function ping(Request $request)
     {
         $validated = $request->validate([
-            'chat_id'     => 'required|exists:chats,id',
+            'chat_id' => 'required|exists:chats,id',
             'current_url' => 'nullable|string|max:2048',
         ]);
 
@@ -521,14 +628,14 @@ class ChatController extends Controller
 
         $updates = [
             'last_activity' => now(),
-            'ip'            => DB::raw("COALESCE(ip, '{$request->ip()}')"),
+            'ip' => DB::raw("COALESCE(ip, '{$request->ip()}')"),
         ];
 
         if ($currentUrl) {
             $updates['current_url'] = $currentUrl;
         }
-       Chat::where('id', $validated['chat_id'])->update($updates);
-       $chat = Chat::find($validated['chat_id']);
+        Chat::where('id', $validated['chat_id'])->update($updates);
+        $chat = Chat::find($validated['chat_id']);
         broadcast(new \App\Events\ChatPing($chat));
 
         return response()->json(['status' => 'ok']);
@@ -548,7 +655,7 @@ class ChatController extends Controller
             && preg_match('/^[a-zA-Z0-9._-]{8,100}$/', $payloadVisitorId) === 1
             && hash_equals((string) $chat->visitor_id, $payloadVisitorId);
 
-        if (!$sessionAllowed && !$payloadAllowed) {
+        if (! $sessionAllowed && ! $payloadAllowed) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -575,7 +682,6 @@ class ChatController extends Controller
         return response()->noContent();
     }
 
-
     public function sendUserInfo(Request $request)
     {
         $request->validate([
@@ -584,22 +690,22 @@ class ChatController extends Controller
             'email' => 'required|email',
             'details' => 'required|string',
             'sender_type' => 'required|string',
-            'message_type' => 'required|string'
+            'message_type' => 'required|string',
         ]);
 
         $chat = Chat::find($request->chat_id);
-        
+
         // Create a formatted message with user info
-        $userInfoMessage = "User Information Request:\n" .
-                          "Name: {$request->name}\n" .
-                          "Email: {$request->email}\n" .
+        $userInfoMessage = "User Information Request:\n".
+                          "Name: {$request->name}\n".
+                          "Email: {$request->email}\n".
                           "Details: {$request->details}";
 
         $message = Message::create([
             'chat_id' => $chat->id,
             'sender_type' => $request->sender_type,
             'message' => $userInfoMessage,
-            'message_type' => $request->message_type // Store the special type
+            'message_type' => $request->message_type, // Store the special type
         ]);
 
         $chat->last_message_at = $message->created_at;

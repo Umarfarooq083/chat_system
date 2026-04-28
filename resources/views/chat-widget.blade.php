@@ -22,9 +22,11 @@
         .send:disabled { opacity: .6; cursor: not-allowed; }
         .attach-btn { border: 1px solid #d1d5db; border-radius: 20px; padding: 7px 13px 7px 14px; background: #fff; cursor: pointer; font-size: 14px; }
         .hint { padding: 10px 12px; color: #6b7280; font-size: 12px; }
+        .prechat-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #ecfeff; }
+        .prechat-form.show { display: block; }
         .info-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #eff6ff; }
         .info-form.show { display: block; }
-        .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .form-row { display: grid; gap: 8px; margin-bottom: 8px; }
         .form-input { flex: 1; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; font-size: 13px; outline: none; }
         .form-input:focus { border-color: var(--brand); }
         .form-btn { border: 0; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -46,6 +48,16 @@
         <button class="btn" id="closeBtn" type="button">-</button>
     </div>
     <div class="body" id="messages"></div>
+    <div class="prechat-form" id="prechatForm">
+        <div class="hint" style="color: #0e7490; font-weight: 600;">To start chat, please provide:</div>
+        <div class="form-row">
+            <input class="form-input" id="prechatName" type="text" placeholder="Your Name" required>
+            <input class="form-input" id="prechatPhone" type="tel" placeholder="Phone No" required>
+        </div>
+        <div class="form-row" style="justify-content: flex-end; gap: 8px;">
+            <button class="form-btn primary" id="prechatSubmit" type="button">Start Chat</button>
+        </div>
+    </div>
     <div class="info-form" id="infoForm">
         <div class="hint" style="color: #1e40af; font-weight: 600;">Please provide your information:</div>
         <div class="form-row">
@@ -82,6 +94,10 @@
     const sendBtn = document.getElementById('sendBtn');
     const attachBtn = document.getElementById('attachBtn');
     const fileInput = document.getElementById('fileInput');
+    const prechatFormEl = document.getElementById('prechatForm');
+    const prechatNameEl = document.getElementById('prechatName');
+    const prechatPhoneEl = document.getElementById('prechatPhone');
+    const prechatSubmitBtn = document.getElementById('prechatSubmit');
     const infoFormEl = document.getElementById('infoForm');
     const phoneEl = document.getElementById('phone');
     const customerNameEl = document.getElementById('customerName');
@@ -109,6 +125,7 @@
     let pusher = null;
     let channelSubscription = null;
     let renderedMessageIds = new Set();
+    let showPrechatForm = false;
     let showUserForm = false;
     let attachedFile = null;
     let lastSentUrl = null;
@@ -156,6 +173,17 @@
                     <div>Email: ${info.email || ''}</div>
                     <div>Phone: ${info.phone || ''}</div>
                     <div>Reg No: ${info.registration_no || ''}</div>
+                `;
+            } catch (e) {
+                body.textContent = formatMessageBody(latestMessage.message);
+            }
+        } else if (latestMessage.message_type === 'prechat_info_response') {
+            try {
+                const info = typeof latestMessage.message === 'string' ? JSON.parse(latestMessage.message) : latestMessage.message;
+                body.innerHTML = `
+                    <div style="font-weight: 600; margin-bottom: 4px;">Visitor Details:</div>
+                    <div>Name: ${info.name || ''}</div>
+                    <div>Phone: ${info.phone || ''}</div>
                 `;
             } catch (e) {
                 body.textContent = formatMessageBody(latestMessage.message);
@@ -208,11 +236,27 @@
     }
 
     function updateFormVisibility() {
+        if (showPrechatForm) {
+            prechatFormEl.classList.add('show');
+        } else {
+            prechatFormEl.classList.remove('show');
+        }
         if (showUserForm) {
             infoFormEl.classList.add('show');
         } else {
             infoFormEl.classList.remove('show');
         }
+
+        const blockComposer = showPrechatForm === true;
+        textEl.disabled = blockComposer;
+        attachBtn.disabled = blockComposer;
+        fileInput.disabled = blockComposer;
+        attachBtn.style.opacity = blockComposer ? '0.55' : '1';
+        attachBtn.style.cursor = blockComposer ? 'not-allowed' : 'pointer';
+        if (blockComposer) {
+            removeAttachment();
+        }
+        updateSendButton();
     }
 
     function scrollToBottom() {
@@ -273,6 +317,12 @@
                 if (message.message_type === 'user_info_response' && message.sender_type === 'visitor') {
                     showUserForm = false;
                 }
+                if (message.message_type === 'prechat_info_request') {
+                    showPrechatForm = true;
+                }
+                if (message.message_type === 'prechat_info_response' && message.sender_type === 'visitor') {
+                    showPrechatForm = false;
+                }
                 if (message.sender_type === 'agent') {
                     markVisitorRead();
                 }
@@ -310,6 +360,7 @@
             visitorLastReadAt = data.chat?.visitor_last_read_at || null;
             messagesEl.innerHTML = '';
             renderedMessageIds.clear(); // Clear previous message IDs
+            showPrechatForm = !!data.chat?.prechat_required;
             (data.messages || []).forEach(m => {
                 renderMessage(m);
                 lastId = Math.max(lastId, Number(m.id || 0));
@@ -318,6 +369,12 @@
                 }
                 if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
                     showUserForm = false;
+                }
+                if (m.message_type === 'prechat_info_request') {
+                    showPrechatForm = true;
+                }
+                if (m.message_type === 'prechat_info_response' && m.sender_type === 'visitor') {
+                    showPrechatForm = false;
                 }
             });
             updateFormVisibility();
@@ -337,6 +394,10 @@
     }
 
     async function send() {
+        if (showPrechatForm) {
+            alert('Please provide your name and phone number to start chatting.');
+            return;
+        }
         const msg = textEl.value.trim();
         const hasText = msg !== '';
         
@@ -374,6 +435,55 @@
         } finally {
             sendBtn.disabled = false;
             textEl.focus();
+        }
+    }
+
+    async function submitPrechat() {
+        const name = prechatNameEl.value.trim();
+        const phone = prechatPhoneEl.value.trim();
+
+        if (!name || !phone) {
+            alert('Please fill in the required fields (Name, Phone No).');
+            return;
+        }
+
+        prechatSubmitBtn.disabled = true;
+        try {
+            const formData = new FormData();
+            formData.append('visitor_id', visitorId);
+            formData.append('chat_id', chatId);
+            formData.append('company_id', companyId);
+            formData.append('message_type', 'prechat_info_response');
+            formData.append('customer_name', name);
+            formData.append('phone', phone);
+            formData.append('message', JSON.stringify({ type: 'prechat_info_response', name, phone }));
+            formData.append('current_url', document.referrer || null);
+            formData.append('referrer_url', document.referrer || null);
+
+            const response = await fetch(`${apiBase}/message`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                throw new Error(text || `Request failed (${response.status})`);
+            }
+            const data = await response.json();
+
+            showPrechatForm = false;
+            updateFormVisibility();
+            prechatNameEl.value = '';
+            prechatPhoneEl.value = '';
+
+            if (data && data.message) {
+                renderMessage(data.message);
+                lastId = Math.max(lastId, Number(data.message.id || 0));
+                scrollToBottom();
+            }
+        } catch (error) {
+            alert('Failed to submit info. Please try again.');
+        } finally {
+            prechatSubmitBtn.disabled = false;
         }
     }
 
@@ -495,6 +605,10 @@
     }
 
     function updateSendButton() {
+        if (showPrechatForm) {
+            sendBtn.disabled = true;
+            return;
+        }
         const hasText = textEl.value.trim() !== '';
         const hasFile = attachedFile !== null;
         sendBtn.disabled = !hasText && !hasFile;
@@ -548,6 +662,7 @@
     }
 
     attachBtn.addEventListener('click', () => {
+        if (showPrechatForm) return;
         fileInput.click();
     });
 
@@ -565,6 +680,7 @@
     });
 
     sendBtn.addEventListener('click', send);
+    prechatSubmitBtn.addEventListener('click', submitPrechat);
     submitInfoBtn.addEventListener('click', submitInfo);
     cancelInfoBtn.addEventListener('click', cancelInfo);
 

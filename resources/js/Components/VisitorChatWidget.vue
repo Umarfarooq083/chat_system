@@ -10,8 +10,10 @@ const message = ref('')
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const messageContainer = ref(null)
+const showPrechatForm = ref(false)
 const showUserForm = ref(false)
 const sendError = ref('')
+const chatClosed = ref(false)
 const chatReadState = ref({
   agent_last_read_at: null,
   visitor_last_read_at: null,
@@ -21,6 +23,10 @@ const userForm = ref({
   customerName: '',
   registrationNo: '',
   email: ''
+})
+const prechatForm = ref({
+  name: '',
+  phone: '',
 })
 let chatId = null
 let visitorId = null
@@ -133,6 +139,13 @@ onMounted(async () => {
     if (hasPendingRequest) {
       showUserForm.value = true
     }
+
+    const chat = response.data?.chat || {}
+    const phone = (chat.phone || '').toString().trim()
+    const name = (chat.customer_name || '').toString().trim()
+    const hasBasicInfo = !!phone && !!name
+    const hasPrechatResponse = messages.value.some(msg => msg.message_type === 'prechat_info_response' && msg.sender_type === 'visitor')
+    showPrechatForm.value = !chat.prechat_submitted_at && !chat.user_info_submitted_at && !hasBasicInfo && !hasPrechatResponse
     
     await scrollToBottom()
 
@@ -140,6 +153,12 @@ onMounted(async () => {
       window.Echo.channel('chat.' + chatId)
         .listen('MessageSent', (e) => {
           messages.value.push(e.message)
+          if (e.message.message_type === 'prechat_info_request') {
+            showPrechatForm.value = true
+          }
+          if (e.message.message_type === 'prechat_info_response' && e.message.sender_type === 'visitor') {
+            showPrechatForm.value = false
+          }
           // Check if this is a user info request
           if (e.message.message_type === 'user_info_request') {
             showUserForm.value = true
@@ -273,6 +292,10 @@ const clearAttachments = () => {
 
 const sendMessage = async () => {
   if (!chatId) return
+  if (showPrechatForm.value) {
+    sendError.value = 'Please provide your name and phone number to start chatting.'
+    return
+  }
   const hasText = message.value.trim() !== ''
   const hasFiles = attachedFiles.value.length > 0
   if (!hasText && !hasFiles) return
@@ -312,8 +335,50 @@ const sendMessage = async () => {
   } catch (error) {
     console.error('Failed to send message:', error)
     sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
+    // Check if chat was closed
+    if (error?.response?.status === 403 && error?.response?.data?.message?.includes('closed')) {
+      chatClosed.value = true
+    }
     message.value = userMessage
     attachedFiles.value = tempFiles
+  }
+}
+
+const submitPrechatInfo = async () => {
+  if (!chatId) return
+
+  const name = (prechatForm.value.name || '').trim()
+  const phone = (prechatForm.value.phone || '').trim()
+
+  if (!name || !phone) {
+    sendError.value = 'Please fill in the required fields (Name, Phone No).'
+    return
+  }
+
+  try {
+    const cfg = window.ChatConfig || {}
+    const apiBase = cfg.apiBase || ''
+    const headers = {}
+    if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
+
+    const sendUrl = apiBase ? apiBase + '/message' : '/send-message'
+
+    await axios.post(sendUrl, {
+      chat_id: chatId,
+      message: JSON.stringify({ type: 'prechat_info_response', name, phone }),
+      sender_type: 'visitor',
+      message_type: 'prechat_info_response',
+      customer_name: name,
+      phone,
+    }, { headers })
+
+    sendError.value = ''
+    showPrechatForm.value = false
+    prechatForm.value = { name: '', phone: '' }
+    await scrollToBottom()
+  } catch (error) {
+    console.error('Failed to send pre-chat info:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
   }
 }
 
@@ -431,6 +496,16 @@ const cancelUserInfo = () => {
 
             </div>
 
+            <div class="text-sm whitespace-pre-line" v-else-if="msg?.message_type === 'prechat_info_response'">
+              <div class="text-sm whitespace-pre-line">
+                <strong class="text-xs font-bold whitespace-pre-line mb-1.5 flex items-center gap-1.5" style="font-size: 15px;">
+                  Visitor Details:
+                </strong>
+                <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+              </div>
+            </div>
+
             <!-- <div class="text-sm whitespace-pre-line" v-else-if="msg?.message_type === 'external_data_html'">
               <iframe v-if="attachmentViewUrl(msg)"
                 :src="attachmentViewUrl(msg)"
@@ -477,6 +552,38 @@ const cancelUserInfo = () => {
         class="border-t border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start justify-between gap-2">
         <span class="whitespace-pre-line">{{ sendError }}</span>
         <button type="button" class="text-red-700 font-bold leading-none" @click="sendError = ''">×</button>
+      </div>
+
+      <!-- Pre-chat Form -->
+      <div v-if="showPrechatForm" class="border-t p-3 bg-cyan-50 info_form">
+        <h4 class="font-semibold text-cyan-800 mb-3">To start chat, please provide:</h4>
+        <form @submit.prevent="submitPrechatInfo" class="row gx-1">
+          <div class="col-6 mb-1">
+            <input
+              v-model="prechatForm.name"
+              type="text"
+              required
+              placeholder="Your Name"
+              class="form-control form-control-sm"
+            />
+          </div>
+          <div class="col-6 mb-1">
+            <input
+              v-model="prechatForm.phone"
+              type="tel"
+              required
+              placeholder="Phone No"
+              class="form-control form-control-sm"
+            />
+          </div>
+          <div class="col-md-12 mt-2">
+            <div class="row gap-2 m-0 justify-content-end">
+              <button type="submit" class="btn btn-primary btn-sm w-25">
+                Start Chat
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
 
       <!-- User Info Form -->
@@ -540,6 +647,18 @@ const cancelUserInfo = () => {
 
       <!-- Input area -->
       <div  class="border-t p-2">
+        <!-- Chat Closed Overlay -->
+        <div v-if="chatClosed" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
+          <div class="text-center">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400">
+              <path d="M18 6 6 18" />
+              <path d="M6 6l12 12" />
+            </svg>
+            <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
+            <p class="text-xs text-slate-400 mt-1">No further messages can be sent.</p>
+          </div>
+        </div>
+
         <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(item, index) in attachedFiles" :key="index"
             class="relative flex items-center gap-2 bg-gray-100 border border-gray-200 rounded px-2 py-1">
@@ -556,17 +675,20 @@ const cancelUserInfo = () => {
           <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
           <button type="button" @click="triggerFileInput" title="Attach file"
-            class="w-20 rounded-5 border-1">
+            class="w-20 rounded-5 border-1"
+            :disabled="showPrechatForm || chatClosed"
+            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || chatClosed }">
             <i class="fa fa-paperclip"></i>
           </button>
 
           <input v-model="message" type="text" placeholder="Type a message..."
-            class="form-control rounded-5" />
+            class="form-control rounded-5"
+            :disabled="showPrechatForm || chatClosed" />
 
           <button type="submit"
             class="btn btn-primary btn-sm rounded-5 px-3"
-            :disabled="!message.trim() && !attachedFiles.length"
-            :class="{ 'opacity-50 cursor-not-allowed': !message.trim() && !attachedFiles.length }">
+            :disabled="showPrechatForm || chatClosed || (!message.trim() && !attachedFiles.length)"
+            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || chatClosed || (!message.trim() && !attachedFiles.length) }">
             Send
           </button>
         </form>

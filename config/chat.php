@@ -10,8 +10,8 @@ return [
     'widget_brand_color' => env('CHAT_WIDGET_BRAND_COLOR', '#111827'),
 
     // Initial message shown when a chat is created for the first time.
-    'welcome_message' => env('CHAT_WELCOME_MESSAGE', 'Welcome! How can we help you today?'),
-    'widget_welcome_message' => env('CHAT_WIDGET_WELCOME_MESSAGE', 'Welcome! How can we help you today?'),
+    'welcome_message' => env('CHAT_WELCOME_MESSAGE', 'Assalam-o-Alaikum and Welcome to Blue World City customer care, how may I help you?'),
+    'widget_welcome_message' => env('CHAT_WIDGET_WELCOME_MESSAGE', 'Assalam-o-Alaikum and Welcome to Blue World City customer care, how may I help you?'),
 
     // Third-party registration API (used by agent UI)
     // Given cURL example:

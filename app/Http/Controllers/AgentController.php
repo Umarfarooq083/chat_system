@@ -3,23 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Events\ChatReadUpdated;
-use Carbon\Carbon;
-use Illuminate\Http\Request;
+use App\Events\MessageSent;
 use App\Models\Chat;
 use App\Models\ChatExternalApiFetch;
 use App\Models\ChatFeedback;
-use App\Models\Message;
-use App\Events\MessageSent;
 use App\Models\Company;
-use Inertia\Inertia;
+use App\Models\Message;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 class AgentController extends Controller
 {
-   
     private function assertCanActOnChat(Chat $chat): void
     {
         if ($chat->assigned_agent_id && $chat->assigned_agent_id !== auth()->id()) {
@@ -31,6 +32,7 @@ class AgentController extends Controller
     {
         return Inertia::render('Dashboard');
     }
+
     public function cnicLookup(Request $request)
     {
         $validated = $request->validate([
@@ -43,46 +45,46 @@ class AgentController extends Controller
                 'message' => 'CNIC must be 13 digits.',
             ], 422);
         }
-    
-        try {
-        $response = Http::withHeaders([
-            'token' => env('LEDGER_API_TOKEN'),
-        ])
-        ->timeout(920)
-        ->get(env('CNIC_LOOKUP_API_URL'), [
-            'cnic' => $validated['cnic'],
-        ]);
-        $jsonResponse = $response->json();
-    
-        if ($response->failed()) {
-            return response()->json([
-                'message' => 'CNIC lookup API failed.',
-                'status' => $response->status(),
-                'details' => Str::limit((string) $response->body(), 2000),
-            ], 502);
-        }
 
-        return response()->json([
-            'cnic' => $digits,
-            'digits' => $digits,
-            'data' => $jsonResponse,
-        ]);
+        try {
+            $response = Http::withHeaders([
+                'token' => env('LEDGER_API_TOKEN'),
+            ])
+                ->timeout(920)
+                ->get(env('CNIC_LOOKUP_API_URL'), [
+                    'cnic' => $validated['cnic'],
+                ]);
+            $jsonResponse = $response->json();
+
+            if ($response->failed()) {
+                return response()->json([
+                    'message' => 'CNIC lookup API failed.',
+                    'status' => $response->status(),
+                    'details' => Str::limit((string) $response->body(), 2000),
+                ], 502);
+            }
+
+            return response()->json([
+                'cnic' => $digits,
+                'digits' => $digits,
+                'data' => $jsonResponse,
+            ]);
         } catch (\Throwable $e) {
             report($e);
 
             return response()->json([
-                'message' => 'CNIC lookup failed.' . $e->getMessage(),
+                'message' => 'CNIC lookup failed.'.$e->getMessage(),
             ], 500);
         }
     }
 
     public function index()
     {
-      $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
-      $CompanyUUID = [];
-      if($companyIds){
-        $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
-      }  
+        $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
+        $CompanyUUID = [];
+        if ($companyIds) {
+            $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
+        }
 
         $chats = Chat::query()
             ->with('agent')
@@ -104,7 +106,7 @@ class AgentController extends Controller
                         ->where('sender_type', 'visitor')
                         ->where(function ($q) {
                             $q->whereNull('chats.agent_last_read_at')
-                            ->orWhereColumn('messages.created_at', '>', 'chats.agent_last_read_at');
+                                ->orWhereColumn('messages.created_at', '>', 'chats.agent_last_read_at');
                         });
                 },
             ])
@@ -132,7 +134,7 @@ class AgentController extends Controller
         ]);
 
         $since = null;
-        if (!empty($validated['cursor'])) {
+        if (! empty($validated['cursor'])) {
             try {
                 $since = Carbon::parse($validated['cursor']);
             } catch (\Throwable $e) {
@@ -145,9 +147,9 @@ class AgentController extends Controller
 
         $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
         $CompanyUUID = [];
-        if($companyIds){
+        if ($companyIds) {
             $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
-        } 
+        }
 
         $chats = Chat::query()
             ->where('updated_at', '>', $since)
@@ -227,7 +229,7 @@ class AgentController extends Controller
     public function show(Chat $chat)
     {
         return Inertia::render('Agent/ChatDetail', [
-            'chat' => $chat->load('messages')
+            'chat' => $chat->load('messages'),
         ]);
     }
 
@@ -247,6 +249,7 @@ class AgentController extends Controller
             $chat->save();
             broadcast(new ChatReadUpdated($chat, 'agent'));
         }
+
         return response()->noContent();
     }
 
@@ -270,9 +273,10 @@ class AgentController extends Controller
             'accept' => 'text/plain',
             'Authorization' => env('ENQUIRY_TYPE_API_TOKEN'),
         ])->get(env('ENQUIRY_TYPE_API_URL'), [
-            'AppDateTime' => Date('Y-m-d')
+            'AppDateTime' => date('Y-m-d'),
         ]);
         $apiData = $response->json();
+
         return response()->json([
             'feedbacks' => $feedbacks,
             'inquiries' => $apiData,
@@ -286,39 +290,37 @@ class AgentController extends Controller
                 $hasAtLeastOne = false;
 
                 foreach ($value as $group) {
-                    if (!empty($group)) {
+                    if (! empty($group)) {
                         $hasAtLeastOne = true;
                         break;
                     }
                 }
-                if (!$hasAtLeastOne) {
+                if (! $hasAtLeastOne) {
                     $fail('At least one inquiry must contain data.');
                 }
             }],
         ]);
 
         $inquiryFeedBack = [];
-        foreach ($request->inquiries as $key => $inquiryId) 
-        {
-            foreach($inquiryId as $list)
-                {
-                    $inquiryFeedBack[] = [
-                        'chat_id' => $chat->id,
-                        'chat_type' => 'web_chat',
-                        'registration' => $request->registration_no,
-                        'inquiry_type' => $key,
-                        'inquiry_id' => $list['id'],
-                        'inquiry_name' => $list['name'],
-                        'status' => 1,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                }      
+        foreach ($request->inquiries as $key => $inquiryId) {
+            foreach ($inquiryId as $list) {
+                $inquiryFeedBack[] = [
+                    'chat_id' => $chat->id,
+                    'chat_type' => 'web_chat',
+                    'registration' => $request->registration_no,
+                    'inquiry_type' => $key,
+                    'inquiry_id' => $list['id'],
+                    'inquiry_name' => $list['name'],
+                    'status' => 1,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
         }
         ChatFeedback::insert($inquiryFeedBack);
         $payload = [
-            "registration_no" => $request->registration_no,
-            "inquiries" => $request->inquiries,
+            'registration_no' => $request->registration_no,
+            'inquiries' => $request->inquiries,
         ];
 
         $url = env('ENQUIRY_TYPE_POST_API_URL');
@@ -328,9 +330,10 @@ class AgentController extends Controller
             'Authorization' => '6XesrAM2Nu',
             'Content-Type' => 'application/json',
         ])->post(
-            $url . '?AppDateTime=' . now()->toDateString(),
+            $url.'?AppDateTime='.now()->toDateString(),
             $payload
         );
+
         return response()->json([
             'message' => 'Feedback stored successfully',
         ], 201);
@@ -338,13 +341,25 @@ class AgentController extends Controller
 
     public function close(Chat $chat)
     {
-        // dd($chat);
         if ($chat->assigned_agent_id && $chat->assigned_agent_id !== auth()->id()) {
             return response()->noContent();
         }
 
-        if (!$chat->assigned_agent_id) {
+        if (! $chat->assigned_agent_id) {
             $chat->assigned_agent_id = auth()->id();
+        }
+
+        // Only send thank you message if chat is not already closed
+        if ($chat->status !== 'close') {
+            $thankYouMessage = Message::create([
+                'chat_id' => $chat->id,
+                'sender_type' => 'agent',
+                'message' => 'Thank you for contacting us. We appreciate your time and hope we were able to assist you. If you have any further questions, please don\'t hesitate to reach out again.',
+                'message_type' => 'system',
+            ]);
+
+            $chat->last_message_at = $thankYouMessage->created_at;
+            broadcast(new MessageSent($thankYouMessage));
         }
 
         $chat->status = 'close';
@@ -374,7 +389,7 @@ class AgentController extends Controller
         $this->assertCanActOnChat($chat);
         $chat->loadMissing('messages');
         $registrationNo = $request->input('registration_no');
-        if (!$registrationNo) {
+        if (! $registrationNo) {
             return response()->json([
                 'message' => 'Registration No is missing for this chat.',
             ], 422);
@@ -383,21 +398,21 @@ class AgentController extends Controller
             $response = Http::withHeaders([
                 'token' => env('LEDGER_API_TOKEN'),
             ])
-            ->timeout(920)
-            ->get(env('LEDGER_API_URL'), [
-                'file' => $registrationNo
-            ]);
+                ->timeout(920)
+                ->get(env('LEDGER_API_URL'), [
+                    'file' => $registrationNo,
+                ]);
             if ($response->failed()) {
                 return response()->json([
                     'error' => 'External API failed',
-                    'details' => $response->body()
+                    'details' => $response->body(),
                 ], 500);
             }
             $data = $response->json();
             if (isset($data['meta']['data']) && is_string($data['meta']['data'])) {
                 $decodedHtml = urldecode($data['meta']['data']);
                 $decodedHtml = $this->addBootstrap4($decodedHtml);
-                if (!$chat->registration_no || trim((string) $chat->registration_no) !== $registrationNo) {
+                if (! $chat->registration_no || trim((string) $chat->registration_no) !== $registrationNo) {
                     $chat->registration_no = $registrationNo;
                 }
                 $reg = (string) $registrationNo;
@@ -406,9 +421,9 @@ class AgentController extends Controller
                 if ($safeReg === '') {
                     $safeReg = 'registration';
                 }
-                $fileName = 'external-html-' . $safeReg . '-' . (string) Str::uuid() . '.html';
-                $dir = 'external-api/' . $chat->id;
-                $htmlPath = $dir . '/' . $fileName;
+                $fileName = 'external-html-'.$safeReg.'-'.(string) Str::uuid().'.html';
+                $dir = 'external-api/'.$chat->id;
+                $htmlPath = $dir.'/'.$fileName;
                 Storage::disk('public')->put($htmlPath, $decodedHtml);
                 $payload = [
                     'html_path' => $htmlPath,
@@ -429,6 +444,7 @@ class AgentController extends Controller
                     'response' => $payload,
                     'fetched_at' => $chat->external_api_fetched_at,
                 ]);
+
                 return response()->json([
                     'chat' => $chat,
                     'external_data' => $payload,
@@ -447,14 +463,15 @@ class AgentController extends Controller
                 'response' => $chat->external_api_response,
                 'fetched_at' => $chat->external_api_fetched_at,
             ]);
+
             return response()->json([
                 'chat' => $chat,
-                'external_data' => $data
+                'external_data' => $data,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Something went wrong',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -473,7 +490,7 @@ class AgentController extends Controller
         $data = $fetch?->response;
         $html = '';
         if (is_array($data)) {
-            if (!empty($data['html_path']) && is_string($data['html_path'])) {
+            if (! empty($data['html_path']) && is_string($data['html_path'])) {
                 $disk = Storage::disk('public');
                 if ($disk->exists($data['html_path'])) {
                     $html = (string) $disk->get($data['html_path']);
@@ -484,7 +501,7 @@ class AgentController extends Controller
             }
         }
         $html = trim((string) $html);
-        if (!$fetch || $html === '') {
+        if (! $fetch || $html === '') {
             return response()->json([
                 'message' => 'No external HTML found for this registration. Please fetch data first.',
             ], 422);
@@ -497,9 +514,9 @@ class AgentController extends Controller
                 $safeReg = 'registration';
             }
 
-            $fileName = 'external-html-' . $safeReg . '-' . (string) Str::uuid() . '.html';
-            $dir = 'chat-attachments/' . $chat->id;
-            $path = $dir . '/' . $fileName;
+            $fileName = 'external-html-'.$safeReg.'-'.(string) Str::uuid().'.html';
+            $dir = 'chat-attachments/'.$chat->id;
+            $path = $dir.'/'.$fileName;
             Storage::disk('public')->put($path, $html);
 
             $message = Message::create([
@@ -513,12 +530,13 @@ class AgentController extends Controller
 
             $chat->last_message_at = $message->created_at;
             $chat->agent_last_read_at = now();
-            if (!$chat->assigned_agent_id) {
+            if (! $chat->assigned_agent_id) {
                 $chat->assigned_agent_id = auth()->id();
             }
             $chat->save();
             broadcast(new MessageSent($message));
             broadcast(new ChatReadUpdated($chat, 'agent'));
+
             return response()->json([
                 'chat' => $chat,
                 'message' => $message,
@@ -538,17 +556,17 @@ class AgentController extends Controller
         $viewport = '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">';
 
         if (strpos($html, '<head>') !== false) {
-            $html = str_replace('<head>', '<head>' . $viewport . $bootstrapCss, $html);
+            $html = str_replace('<head>', '<head>'.$viewport.$bootstrapCss, $html);
         } else {
-            $html = '<head>' . $viewport . $bootstrapCss . '</head>' . $html;
+            $html = '<head>'.$viewport.$bootstrapCss.'</head>'.$html;
         }
         if (strpos($html, '<div class="container') === false) {
             if (preg_match('/<body[^>]*>(.*?)<\/body>/is', $html, $matches)) {
                 $bodyContent = $matches[1];
-                $wrappedContent = '<div class="container mt-3">' . $bodyContent . '</div>';
+                $wrappedContent = '<div class="container mt-3">'.$bodyContent.'</div>';
                 $html = str_replace($bodyContent, $wrappedContent, $html);
             } else {
-                $html = '<div class="container mt-3">' . $html . '</div>';
+                $html = '<div class="container mt-3">'.$html.'</div>';
             }
         }
 
@@ -562,13 +580,13 @@ class AgentController extends Controller
     {
         $validated = $request->validate([
             'from' => 'nullable|date',
-            'to'   => 'nullable|date',
+            'to' => 'nullable|date',
         ]);
 
         $selectedCompany = $request->input('selectedCompany');
 
         $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::today()->startOfDay();
-        $to   = isset($validated['to'])   ? Carbon::parse($validated['to'])->endOfDay()     : Carbon::today()->endOfDay();
+        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : Carbon::today()->endOfDay();
         if ($from->gt($to)) {
             [$from, $to] = [$to, $from];
         }
@@ -580,51 +598,47 @@ class AgentController extends Controller
                 $q->where('sender_type', 'visitor');
             })->count(),
 
-            'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status','open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status', 'open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
             'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
             'chats_by_status' => Chat::byCompanyUuid($selectedCompany)->select('status', DB::raw('count(*) as count'))
                 ->whereBetween('created_at', [$from, $to])
                 ->groupBy('status')
                 ->get(),
             'agent_concurrency' => DB::table('chats')
-            ->join('users as agents', 'chats.assigned_agent_id', '=', 'agents.id')
-            ->join('companies', 'chats.company_id', '=', 'companies.uuid')
-            ->leftJoin('messages', 'messages.chat_id', '=', 'chats.id')
-
-            ->when($selectedCompany, function ($query) use ($selectedCompany) {
-                $query->where('companies.uuid', $selectedCompany);
-            })
-
-            ->whereBetween('chats.created_at', [$from, $to])
-            ->whereNotNull('chats.assigned_agent_id')
-
-            ->select(
-                'chats.assigned_agent_id',
-                'agents.name',
-                DB::raw("
+                ->join('users as agents', 'chats.assigned_agent_id', '=', 'agents.id')
+                ->join('companies', 'chats.company_id', '=', 'companies.uuid')
+                ->leftJoin('messages', 'messages.chat_id', '=', 'chats.id')
+                ->when($selectedCompany, function ($query) use ($selectedCompany) {
+                    $query->where('companies.uuid', $selectedCompany);
+                })
+                ->whereBetween('chats.created_at', [$from, $to])
+                ->whereNotNull('chats.assigned_agent_id')
+                ->select(
+                    'chats.assigned_agent_id',
+                    'agents.name',
+                    DB::raw("
                     COUNT(DISTINCT CASE 
                         WHEN messages.sender_type = 'agent' 
                         THEN chats.id 
                     END) as agent_sent_users
                 "),
-                DB::raw("
+                    DB::raw("
                     COUNT(DISTINCT CASE 
                         WHEN messages.sender_type = 'visitor' 
                         THEN chats.id 
                     END) as user_replied_users
                 ")
-            )
-
-            ->groupBy('chats.assigned_agent_id', 'agents.name')
-            ->get(),
+                )
+                ->groupBy('chats.assigned_agent_id', 'agents.name')
+                ->get(),
         ];
 
         return Inertia::render('Agent/Reports', [
-            'stats'   => $stats,
+            'stats' => $stats,
             'filters' => [
                 'from' => $from->toDateString(),
-                'to'   => $to->toDateString(),
-                'selectedCompany'   => $request->input('selectedCompany', ''),
+                'to' => $to->toDateString(),
+                'selectedCompany' => $request->input('selectedCompany', ''),
             ],
             'company' => $company,
         ]);
@@ -640,29 +654,29 @@ class AgentController extends Controller
             DB::raw('count(*) as visits'),
             DB::raw('count(CASE WHEN user_info_submitted_at IS NOT NULL THEN 1 END) as info_submissions'),
             DB::raw('(SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, msg_v.created_at, msg_a.created_at)), 0) 
-                      FROM messages msg_v 
-                      JOIN messages msg_a ON msg_v.chat_id = msg_a.chat_id 
-                      WHERE msg_v.sender_type = "visitor" AND msg_a.sender_type = "agent" 
-                      AND msg_a.created_at > msg_v.created_at 
-                      AND DATE(msg_v.created_at) = DATE(ANY_VALUE(chats.created_at))) as avg_response_time')
+                       FROM messages msg_v 
+                       JOIN messages msg_a ON msg_v.chat_id = msg_a.chat_id 
+                       WHERE msg_v.sender_type = "visitor" AND msg_a.sender_type = "agent" 
+                       AND msg_a.created_at > msg_v.created_at 
+                       AND DATE(msg_v.created_at) = DATE(ANY_VALUE(chats.created_at))) as avg_response_time')
         )
-        ->where('created_at', '>=', now()->subDays(30))
-        ->groupBy('date')
-        ->orderBy('date', 'desc')
-        ->get();
+            ->where('created_at', '>=', now()->subDays(30))
+            ->groupBy('date')
+            ->orderBy('date', 'desc')
+            ->get();
 
-        $fileName = 'chat_reports_' . date('Y-m-d') . '.csv';
+        $fileName = 'chat_reports_'.date('Y-m-d').'.csv';
         $headers = [
-            "Content-type"        => "text/csv",
-            "Content-Disposition" => "attachment; filename=$fileName",
-            "Pragma"              => "no-cache",
-            "Cache-Control"       => "must-revalidate, post-check=0, pre-check=0",
-            "Expires"             => "0"
+            'Content-type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=$fileName",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
         ];
 
         $columns = ['Date', 'Visits', 'Leads (Info Submissions)', 'Avg Response Time (seconds)'];
 
-        $callback = function() use($dailyStats, $columns) {
+        $callback = function () use ($dailyStats, $columns) {
             $file = fopen('php://output', 'w');
             fputcsv($file, $columns);
 
@@ -675,5 +689,149 @@ class AgentController extends Controller
 
         return response()->stream($callback, 200, $headers);
     }
+
+    /**
+     * Display SLA report showing average first response time.
+     */
+    public function slaReport(Request $request)
+    {
+        $validated = $request->validate([
+            'from' => 'nullable|date',
+            'to' => 'nullable|date',
+            'selectedCompany' => 'nullable|string',
+        ]);
+
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::today()->startOfDay();
+        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : Carbon::today()->endOfDay();
+        if ($from->gt($to)) {
+            [$from, $to] = [$to, $from];
+        }
+        $selectedCompany = $request->input('selectedCompany');
+        // dd($selectedCompany);
+        $company = Company::get();
+        $chatsQuery = Chat::whereBetween('created_at', [$from, $to]);
+        if ($selectedCompany) {
+            $chatsQuery->where('company_id', $selectedCompany);
+        }
+        $chats = $chatsQuery->get();
+        $chatIds = $chats->pluck('id')->toArray();
+        // dd($chats);
+        if (empty($chatIds)) {
+            // dd($chatIds,'fdsfsdfsd');
+            $stats = [
+                'avg_response_time' => 0,
+                'total_chats' => 0,
+                'chats_with_response' => 0,
+                'delayed_chats' => [],
+                'unanswered_chats' => [],
+            ];
+        } else {
+            // dd($chatIds,'12');
+            $messages = Message::whereIn('chat_id', $chatIds)
+                ->with('chat.agent')
+                ->orderBy('chat_id')
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            $chatData = [];
+            foreach ($messages as $message) {
+                $chatData[$message->chat_id][] = $message;
+            }
+            $responseTimes = [];
+            $delayedChats = [];
+            $unansweredChats = [];
+
+            foreach ($chatData as $chatId => $msgs) {
+                $firstVisitor = null;
+                foreach ($msgs as $msg) {
+                    if ($msg->sender_type === 'visitor') {
+                        $firstVisitor = $msg;
+                        break;
+                    }
+                }
+                if (! $firstVisitor) {
+                    continue;
+                }
+
+                $firstAgent = null;
+                foreach ($msgs as $msg) {
+                    if ($msg->sender_type === 'agent' && $msg->created_at > $firstVisitor->created_at) {
+                        $firstAgent = $msg;
+                        break;
+                    }
+                }
+
+                if (! $firstAgent) {
+                    $unansweredChats[] = [
+                        'chat_id' => $chatId,
+                        'created_at' => $msgs[0]->created_at->toDateTimeString(),
+                        // 'first_message' => $msgs[1]->message ?? '',
+                        'first_message' => json_decode($msgs[1]->message, true) ?: $msgs[1]->message,
+                    ];
+
+                    continue;
+                }
+                
+                $responseTime = $firstAgent->created_at->getTimestamp() - $firstVisitor->created_at->getTimestamp();
+                if ($responseTime >= 120) {
+                    $delayedChats[] = [
+                        'chat_id' => $chatId,
+                        'response_time_seconds' => $responseTime,
+                        'customer_name' => $firstAgent->chat->customer_name ?? 'N/A',
+                        'agent_name' => $firstAgent->chat->agent->name ?? 'N/A',
+                        // 'visitor_message' => $firstVisitor->message ?? '',
+                        // 'first_visitor_message_type' => $firstVisitor->message_type,
+                        // 'first_visitor_message_at' => $firstVisitor->created_at->toDateTimeString(),
+                        // 'first_agent_response_at' => $firstAgent->created_at->toDateTimeString(),
+                    ];
+                }
+
+                $responseTimes[] = $responseTime;
+            }
+
+            $avgResponseTime = empty($responseTimes) ? 0 : array_sum($responseTimes) / count($responseTimes);
+
+            $delayedChatsPaginated = $this->paginateArray($delayedChats, 25);
+            $unansweredChatsPaginated = $this->paginateArray($unansweredChats, 25);
+
+            $stats = [
+                'avg_response_time' => round($avgResponseTime / 60, 2),
+                'total_chats' => count($chatIds),
+                'chats_with_response' => count($responseTimes),
+                'delayed_chats' => $delayedChatsPaginated,
+                'unanswered_chats' => $unansweredChatsPaginated,
+            ];
+        }
+        // dd($stats);
+        return Inertia::render('Agent/SlaReport', [
+            'stats' => $stats,
+            'filters' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'selectedCompany' => $selectedCompany,
+            ],
+            'company' => $company,
+        ]);
+    }
+
+
+    private function paginateArray($items, $perPage = 25, $page = null, $options = [])
+    {
+        $page = $page ?: LengthAwarePaginator::resolveCurrentPage();
+        $items = $items instanceof Collection ? $items : collect($items);
+        $options = [
+            'path' => request()->url(),
+            'query' => request()->query(), 
+        ];
+        return new LengthAwarePaginator(
+            $items->forPage($page, $perPage),
+            $items->count(),
+            $perPage,
+            $page,
+            $options
+        );
+    }
+
+
 
 }
