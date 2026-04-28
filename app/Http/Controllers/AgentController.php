@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 class AgentController extends Controller
 {
@@ -652,11 +654,11 @@ class AgentController extends Controller
             DB::raw('count(*) as visits'),
             DB::raw('count(CASE WHEN user_info_submitted_at IS NOT NULL THEN 1 END) as info_submissions'),
             DB::raw('(SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, msg_v.created_at, msg_a.created_at)), 0) 
-                      FROM messages msg_v 
-                      JOIN messages msg_a ON msg_v.chat_id = msg_a.chat_id 
-                      WHERE msg_v.sender_type = "visitor" AND msg_a.sender_type = "agent" 
-                      AND msg_a.created_at > msg_v.created_at 
-                      AND DATE(msg_v.created_at) = DATE(ANY_VALUE(chats.created_at))) as avg_response_time')
+                       FROM messages msg_v 
+                       JOIN messages msg_a ON msg_v.chat_id = msg_a.chat_id 
+                       WHERE msg_v.sender_type = "visitor" AND msg_a.sender_type = "agent" 
+                       AND msg_a.created_at > msg_v.created_at 
+                       AND DATE(msg_v.created_at) = DATE(ANY_VALUE(chats.created_at))) as avg_response_time')
         )
             ->where('created_at', '>=', now()->subDays(30))
             ->groupBy('date')
@@ -687,4 +689,149 @@ class AgentController extends Controller
 
         return response()->stream($callback, 200, $headers);
     }
+
+    /**
+     * Display SLA report showing average first response time.
+     */
+    public function slaReport(Request $request)
+    {
+        $validated = $request->validate([
+            'from' => 'nullable|date',
+            'to' => 'nullable|date',
+            'selectedCompany' => 'nullable|string',
+        ]);
+
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::today()->startOfDay();
+        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : Carbon::today()->endOfDay();
+        if ($from->gt($to)) {
+            [$from, $to] = [$to, $from];
+        }
+        $selectedCompany = $request->input('selectedCompany');
+        // dd($selectedCompany);
+        $company = Company::get();
+        $chatsQuery = Chat::whereBetween('created_at', [$from, $to]);
+        if ($selectedCompany) {
+            $chatsQuery->where('company_id', $selectedCompany);
+        }
+        $chats = $chatsQuery->get();
+        $chatIds = $chats->pluck('id')->toArray();
+        // dd($chats);
+        if (empty($chatIds)) {
+            // dd($chatIds,'fdsfsdfsd');
+            $stats = [
+                'avg_response_time' => 0,
+                'total_chats' => 0,
+                'chats_with_response' => 0,
+                'delayed_chats' => [],
+                'unanswered_chats' => [],
+            ];
+        } else {
+            // dd($chatIds,'12');
+            $messages = Message::whereIn('chat_id', $chatIds)
+                ->with('chat.agent')
+                ->orderBy('chat_id')
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            $chatData = [];
+            foreach ($messages as $message) {
+                $chatData[$message->chat_id][] = $message;
+            }
+            $responseTimes = [];
+            $delayedChats = [];
+            $unansweredChats = [];
+
+            foreach ($chatData as $chatId => $msgs) {
+                $firstVisitor = null;
+                foreach ($msgs as $msg) {
+                    if ($msg->sender_type === 'visitor') {
+                        $firstVisitor = $msg;
+                        break;
+                    }
+                }
+                if (! $firstVisitor) {
+                    continue;
+                }
+
+                $firstAgent = null;
+                foreach ($msgs as $msg) {
+                    if ($msg->sender_type === 'agent' && $msg->created_at > $firstVisitor->created_at) {
+                        $firstAgent = $msg;
+                        break;
+                    }
+                }
+
+                if (! $firstAgent) {
+                    $unansweredChats[] = [
+                        'chat_id' => $chatId,
+                        'created_at' => $msgs[0]->created_at->toDateTimeString(),
+                        // 'first_message' => $msgs[1]->message ?? '',
+                        'first_message' => json_decode($msgs[1]->message, true) ?: $msgs[1]->message,
+                    ];
+
+                    continue;
+                }
+                
+                $responseTime = $firstAgent->created_at->getTimestamp() - $firstVisitor->created_at->getTimestamp();
+                if ($responseTime >= 120) {
+                    $delayedChats[] = [
+                        'chat_id' => $chatId,
+                        'response_time_seconds' => $responseTime,
+                        'customer_name' => $firstAgent->chat->customer_name ?? 'N/A',
+                        'agent_name' => $firstAgent->chat->agent->name ?? 'N/A',
+                        // 'visitor_message' => $firstVisitor->message ?? '',
+                        // 'first_visitor_message_type' => $firstVisitor->message_type,
+                        // 'first_visitor_message_at' => $firstVisitor->created_at->toDateTimeString(),
+                        // 'first_agent_response_at' => $firstAgent->created_at->toDateTimeString(),
+                    ];
+                }
+
+                $responseTimes[] = $responseTime;
+            }
+
+            $avgResponseTime = empty($responseTimes) ? 0 : array_sum($responseTimes) / count($responseTimes);
+
+            $delayedChatsPaginated = $this->paginateArray($delayedChats, 25);
+            $unansweredChatsPaginated = $this->paginateArray($unansweredChats, 25);
+
+            $stats = [
+                'avg_response_time' => round($avgResponseTime / 60, 2),
+                'total_chats' => count($chatIds),
+                'chats_with_response' => count($responseTimes),
+                'delayed_chats' => $delayedChatsPaginated,
+                'unanswered_chats' => $unansweredChatsPaginated,
+            ];
+        }
+        // dd($stats);
+        return Inertia::render('Agent/SlaReport', [
+            'stats' => $stats,
+            'filters' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'selectedCompany' => $selectedCompany,
+            ],
+            'company' => $company,
+        ]);
+    }
+
+
+    private function paginateArray($items, $perPage = 25, $page = null, $options = [])
+    {
+        $page = $page ?: LengthAwarePaginator::resolveCurrentPage();
+        $items = $items instanceof Collection ? $items : collect($items);
+        $options = [
+            'path' => request()->url(),
+            'query' => request()->query(), 
+        ];
+        return new LengthAwarePaginator(
+            $items->forPage($page, $perPage),
+            $items->count(),
+            $perPage,
+            $page,
+            $options
+        );
+    }
+
+
+
 }

@@ -45,18 +45,24 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Chat System
                                 </NavLink>
-                                <NavLink
-                                    :href="route('agent.reports')"
-                                    :active="route().current('agent.reports')"
-                                >
-                                    Reports
-                                </NavLink>
-                                <NavLink
-                                    :href="route('companies.index')"
-                                    :active="route().current('companies.index')"
-                                >
-                                    Companies
-                                </NavLink>
+                                 <NavLink
+                                     :href="route('agent.reports')"
+                                     :active="route().current('agent.reports')"
+                                 >
+                                     Reports
+                                 </NavLink>
+                                 <NavLink
+                                     :href="route('agent.sla-report')"
+                                     :active="route().current('agent.sla-report')"
+                                 >
+                                     SLA Report
+                                 </NavLink>
+                                 <NavLink
+                                     :href="route('companies.index')"
+                                     :active="route().current('companies.index')"
+                                 >
+                                     Companies
+                                 </NavLink>
                                 <NavLink
                                     :href="route('users.index')"
                                     :active="route().current('users.index')"
@@ -176,18 +182,24 @@ const showingNavigationDropdown = ref(false);
                         >
                             Chat System
                         </ResponsiveNavLink>
-                        <ResponsiveNavLink
-                            :href="route('agent.reports')"
-                            :active="route().current('agent.reports')"
-                        >
-                            Reports
-                        </ResponsiveNavLink>
-                        <ResponsiveNavLink
-                            :href="route('companies.index')"
-                            :active="route().current('companies.index')"
-                        >
-                            Companies
-                        </ResponsiveNavLink>
+                         <ResponsiveNavLink
+                             :href="route('agent.reports')"
+                             :active="route().current('agent.reports')"
+                         >
+                             Reports
+                         </ResponsiveNavLink>
+                         <ResponsiveNavLink
+                             :href="route('agent.sla-report')"
+                             :active="route().current('agent.sla-report')"
+                         >
+                             SLA Report
+                         </ResponsiveNavLink>
+                         <ResponsiveNavLink
+                             :href="route('companies.index')"
+                             :active="route().current('companies.index')"
+                         >
+                             Companies
+                         </ResponsiveNavLink>
                         <ResponsiveNavLink
                             :href="route('users.index')"
                             :active="route().current('users.index')"
