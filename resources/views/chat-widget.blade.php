@@ -65,7 +65,12 @@
             <input class="form-input" id="customerName" type="text" placeholder="Customer Name" required>
         </div>
         <div class="form-row">
-            <input class="form-input" id="registrationNo" type="text" placeholder="Registration No" required>
+            <div id="registrationNoList" style="display: grid; gap: 8px;">
+                <div class="reg-row" style="display: flex; gap: 8px; align-items: center;">
+                    <input class="form-input reg-input" type="text" placeholder="Registration No" required>
+                    <button class="form-btn secondary" id="addRegistrationNo" type="button" style="white-space: nowrap;">+ Add</button>
+                </div>
+            </div>
             <input class="form-input" id="email" type="email" placeholder="Email">
         </div>
         <div class="form-row" style="justify-content: flex-end; gap: 8px;">
@@ -101,7 +106,8 @@
     const infoFormEl = document.getElementById('infoForm');
     const phoneEl = document.getElementById('phone');
     const customerNameEl = document.getElementById('customerName');
-    const registrationNoEl = document.getElementById('registrationNo');
+    const registrationNoListEl = document.getElementById('registrationNoList');
+    const addRegistrationNoBtn = document.getElementById('addRegistrationNo');
     const emailEl = document.getElementById('email');
     const submitInfoBtn = document.getElementById('submitInfo');
     const cancelInfoBtn = document.getElementById('cancelInfo');
@@ -132,6 +138,70 @@
     let urlTrackingSetup = false;
     let agentLastReadAt = null;
     let visitorLastReadAt = null;
+
+    function getRegistrationNumbers() {
+        if (!registrationNoListEl) return [];
+        const inputs = registrationNoListEl.querySelectorAll('input.reg-input');
+        return Array.from(inputs)
+            .map((i) => (i.value || '').toString().trim())
+            .filter((v) => v !== '');
+    }
+
+    function addRegistrationInput() {
+        if (!registrationNoListEl) return;
+        const row = document.createElement('div');
+        row.className = 'reg-row';
+        row.style.display = 'flex';
+        row.style.gap = '8px';
+        row.style.alignItems = 'center';
+
+        const input = document.createElement('input');
+        input.className = 'form-input reg-input';
+        input.type = 'text';
+        input.placeholder = 'Registration No';
+        input.required = true;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'form-btn secondary';
+        removeBtn.type = 'button';
+        removeBtn.textContent = 'Remove';
+        removeBtn.style.whiteSpace = 'nowrap';
+        removeBtn.addEventListener('click', () => row.remove());
+
+        row.appendChild(input);
+        row.appendChild(removeBtn);
+        registrationNoListEl.appendChild(row);
+        input.focus();
+    }
+
+    function resetRegistrationInputs() {
+        if (!registrationNoListEl) return;
+        registrationNoListEl.innerHTML = '';
+
+        const row = document.createElement('div');
+        row.className = 'reg-row';
+        row.style.display = 'flex';
+        row.style.gap = '8px';
+        row.style.alignItems = 'center';
+
+        const input = document.createElement('input');
+        input.className = 'form-input reg-input';
+        input.type = 'text';
+        input.placeholder = 'Registration No';
+        input.required = true;
+
+        const addBtn = document.createElement('button');
+        addBtn.className = 'form-btn secondary';
+        addBtn.id = 'addRegistrationNo';
+        addBtn.type = 'button';
+        addBtn.textContent = '+ Add';
+        addBtn.style.whiteSpace = 'nowrap';
+        addBtn.addEventListener('click', addRegistrationInput);
+
+        row.appendChild(input);
+        row.appendChild(addBtn);
+        registrationNoListEl.appendChild(row);
+    }
 
     function formatMessageBody(value) {
         if (value === null || value === undefined) return '';
@@ -490,10 +560,10 @@
     async function submitInfo() {
         const phone = phoneEl.value.trim();
         const customerName = customerNameEl.value.trim();
-        const registrationNo = registrationNoEl.value.trim();
+        const registrationNumbers = getRegistrationNumbers();
         const email = emailEl.value.trim();
 
-        if (!phone || !customerName || !registrationNo) {
+        if (!phone || !customerName || registrationNumbers.length === 0) {
             alert('Please fill in the required fields (Phone No, Customer Name, Registration No).');
             return;
         }
@@ -504,11 +574,11 @@
             formData.append('visitor_id', visitorId);
             formData.append('chat_id', chatId);
             formData.append('company_id', companyId);
-            formData.append('message', `Phone No: ${phone}\nCustomer Name: ${customerName}\nRegistration No: ${registrationNo}\nEmail: ${email}`);
+            formData.append('message', `Phone No: ${phone}\nCustomer Name: ${customerName}\nRegistration No: ${registrationNumbers.join(', ')}\nEmail: ${email}`);
             formData.append('message_type', 'user_info_response');
             formData.append('phone', phone);
             formData.append('customer_name', customerName);
-            formData.append('registration_no', registrationNo);
+            registrationNumbers.forEach((reg) => formData.append('registration_no[]', reg));
             if (email) formData.append('email', email);
             formData.append('current_url', document.referrer || null);
             formData.append('referrer_url', document.referrer || null);
@@ -527,7 +597,7 @@
             // Clear form
             phoneEl.value = '';
             customerNameEl.value = '';
-            registrationNoEl.value = '';
+            resetRegistrationInputs();
             emailEl.value = '';
         } catch (error) {
             alert('Failed to send info. Please try again.');
@@ -551,7 +621,7 @@
         updateFormVisibility();
         phoneEl.value = '';
         customerNameEl.value = '';
-        registrationNoEl.value = '';
+        resetRegistrationInputs();
         emailEl.value = '';
     }
 
@@ -683,6 +753,7 @@
     prechatSubmitBtn.addEventListener('click', submitPrechat);
     submitInfoBtn.addEventListener('click', submitInfo);
     cancelInfoBtn.addEventListener('click', cancelInfo);
+    if (addRegistrationNoBtn) addRegistrationNoBtn.addEventListener('click', addRegistrationInput);
 
     textEl.addEventListener('input', updateSendButton);
 

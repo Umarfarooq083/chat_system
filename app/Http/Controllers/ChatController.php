@@ -440,7 +440,6 @@ class ChatController extends Controller
 
     public function getOrCreateChat(Request $request)
     {
-        // dd($request->all());
         $request->validate([
             'current_url' => 'nullable|string|max:2048',
         ]);
