@@ -143,7 +143,8 @@ class ChatWidgetController extends Controller
             'attachments' => 'nullable|file|max:20480',
             'phone' => 'nullable|string|max:50',
             'customer_name' => 'nullable|string|max:255',
-            'registration_no' => 'nullable|string|max:100',
+            'registration_no' => 'nullable',
+            'registration_no.*' => 'nullable|string|max:100',
             'email' => 'nullable|string|max:255',
             'current_url' => 'nullable|string|max:2048',
             'referrer_url' => 'nullable|string|max:2048',
@@ -155,7 +156,6 @@ class ChatWidgetController extends Controller
 
         $chat = Chat::findOrFail($validated['chat_id']);
 
-        // Prevent messaging on closed chats
         if ($chat->status === 'close') {
             return response()->json([
                 'message' => 'This chat has been closed. No further messages can be sent.',
@@ -178,14 +178,12 @@ class ChatWidgetController extends Controller
             $chat->save();
         }
 
-        // Block chatting until pre-chat info is submitted (except for the pre-chat submission itself)
         if ($chat->prechat_submitted_at === null && $messageType !== 'prechat_info_response') {
             return response()->json([
                 'message' => 'Please provide your name and phone number to start chatting.',
             ], 409);
         }
 
-        // Apply pre-chat info if it's a prechat_info_response
         if ($messageType === 'prechat_info_response') {
             $phone = $request->input('phone');
             $customerName = $request->input('customer_name');
@@ -206,7 +204,6 @@ class ChatWidgetController extends Controller
             }
         }
 
-        // Apply user info if it's a user_info_response
         if ($messageType === 'user_info_response') {
             $phone = $request->input('phone');
             $customerName = $request->input('customer_name');
@@ -215,7 +212,19 @@ class ChatWidgetController extends Controller
 
             $phone = is_string($phone) ? trim($phone) : null;
             $customerName = is_string($customerName) ? trim($customerName) : null;
-            $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+            $registrationNumbers = $registrationNo;
+            if (is_string($registrationNumbers)) {
+                $registrationNumbers = [trim($registrationNumbers)];
+            }
+            if (! is_array($registrationNumbers)) {
+                $registrationNumbers = [];
+            }
+            $registrationNumbers = array_values(array_filter(array_map(function ($value) {
+                return is_string($value) ? trim($value) : null;
+            }, $registrationNumbers), function ($value) {
+                return is_string($value) && $value !== '';
+            }));
+            $registrationNo = $registrationNumbers[0] ?? null;
             $email = is_string($email) ? trim($email) : null;
             if ($email === '') {
                 $email = null;
@@ -258,12 +267,72 @@ class ChatWidgetController extends Controller
         $chat_message = [];
 
         if ($messageType === 'user_info_response') {
+            $registrationNumbers = $request->input('registration_no');
+            if (is_string($registrationNumbers)) {
+                $registrationNumbers = [trim($registrationNumbers)];
+            }
+            if (! is_array($registrationNumbers)) {
+                $registrationNumbers = [];
+            }
+            $registrationNumbers = array_values(array_filter(array_map(function ($value) {
+                return is_string($value) ? trim($value) : null;
+            }, $registrationNumbers), function ($value) {
+                return is_string($value) && $value !== '';
+            }));
+
+            // When multiple registration numbers are submitted, create one message row per number,
+            // matching the internal widget behavior.
+            if (count($registrationNumbers) > 1) {
+                $createdMessages = [];
+
+                foreach ($registrationNumbers as $registrationNo) {
+                    $createdMessages[] = Message::create([
+                        'chat_id' => $chat->id,
+                        'sender_type' => 'visitor',
+                        'message' => json_encode([
+                            'type' => 'user_info_response',
+                            'name' => $request->customer_name,
+                            'email' => $request->email,
+                            'phone' => $request->phone,
+                            'registration_no' => $registrationNo,
+                        ]),
+                        'message_type' => $messageType !== '' ? $messageType : null,
+                        'attachments' => $filePath,
+                    ]);
+                }
+
+                $last = end($createdMessages);
+                if ($last) {
+                    $chat->last_message_at = $last->created_at;
+                    $chat->last_activity = now();
+                    $chat->visitor_last_read_at = now();
+                    if (! $chat->ip) {
+                        $chat->ip = $request->ip();
+                    }
+                    $currentUrl = $validated['current_url'] ?? null;
+                    if ($currentUrl) {
+                        $chat->current_url = $currentUrl;
+                    } elseif (! empty($validated['referrer_url'])) {
+                        $chat->current_url = $validated['referrer_url'];
+                    }
+                    $chat->save();
+
+                    foreach ($createdMessages as $created) {
+                        broadcast(new MessageSent($created));
+                    }
+
+                    return response()->json([
+                        'message' => $this->serializeMessage($last),
+                    ]);
+                }
+            }
+
             $chat_message = [
                 'type' => 'user_info_response',
                 'name' => $request->customer_name,
                 'email' => $request->email,
                 'phone' => $request->phone,
-                'registration_no' => $request->registration_no,
+                'registration_no' => $registrationNumbers[0] ?? $request->registration_no,
             ];
         } elseif ($messageType === 'prechat_info_response') {
             $chat_message = [

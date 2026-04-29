@@ -50,6 +50,9 @@ const currentImageName = ref('')
 let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+let slaNowIntervalId = null
+const SLA_FIRST_REPLY_SECONDS = 120
+const slaNowMs = ref(Date.now())
 
 const feedbacks = ref([])
 const inquiries = ref([])
@@ -159,12 +162,16 @@ onMounted(() => {
   chats.value = props.chats || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
+  slaNowIntervalId = setInterval(() => {
+    slaNowMs.value = Date.now()
+  }, 1000)
   setupAudioUnlock()
 })
 
 onBeforeUnmount(() => {
   if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
   if (pollIntervalId) clearInterval(pollIntervalId)
+  if (slaNowIntervalId) clearInterval(slaNowIntervalId)
 })
 
 watch(() => props.chats, (newChats) => {
@@ -615,6 +622,12 @@ const addMessage = (chatId, message) => {
   if (message.sender_type === 'visitor') chat.is_online = true
   chat.last_message_at = message.created_at
   chat.latest_message = message
+  if (message.sender_type === 'visitor' && !chat.first_visitor_message_at) {
+    chat.first_visitor_message_at = message.created_at
+  }
+  if (message.sender_type === 'agent' && chat.first_visitor_message_at && !chat.first_agent_reply_at) {
+    chat.first_agent_reply_at = message.created_at
+  }
   if (message.sender_type === 'visitor') {
     // Beep for assigned agent when visitor sends a message
     if (chat?.assigned_agent_id === props.auth_user?.id) {
@@ -763,6 +776,42 @@ const toMillis = (value) => {
   if (!value) return null
   const ts = new Date(value).getTime()
   return Number.isNaN(ts) ? null : ts
+}
+
+const slaRemainingSeconds = (chat) => {
+  if (!chat) return null
+  if (chat.status !== 'open') return null
+  if (chat.first_agent_reply_at) return null
+
+  const startedAtMs = toMillis(chat.first_visitor_message_at)
+  if (startedAtMs === null) return null
+
+  const elapsedSeconds = Math.floor((slaNowMs.value - startedAtMs) / 1000)
+  return SLA_FIRST_REPLY_SECONDS - elapsedSeconds
+}
+
+const formatMmSs = (seconds) => {
+  const s = Math.max(0, Math.floor(seconds || 0))
+  const mm = String(Math.floor(s / 60)).padStart(2, '0')
+  const ss = String(s % 60).padStart(2, '0')
+  return `${mm}:${ss}`
+}
+
+const slaBadgeForChat = (chat) => {
+  const remaining = slaRemainingSeconds(chat)
+  if (remaining === null) return null
+  if (remaining <= 0) return { label: 'SLA Breached', variant: 'breached' }
+  return { label: `${formatMmSs(remaining)}`, variant: remaining <= 30 ? 'warning' : 'ok' }
+}
+
+const slaBadgeLabel = (chat) => slaBadgeForChat(chat)?.label ?? null
+
+const slaBadgeClass = (chat) => {
+  const variant = slaBadgeForChat(chat)?.variant
+  if (variant === 'breached') return 'bg-red-100 text-red-800 border-red-200'
+  if (variant === 'warning') return 'bg-amber-100 text-amber-800 border-amber-200'
+  if (variant === 'ok') return 'bg-emerald-100 text-emerald-800 border-emerald-200'
+  return 'bg-slate-100 text-slate-700 border-slate-200'
 }
 
 const isMessageReadByRecipient = (msg) => {
@@ -986,6 +1035,12 @@ const filteredUnassignChatsByCompany = computed(() => {
                   style="min-width: 20px; height: 18px;">
                   {{ chat.unread_count }}
                 </span>
+                <span
+                  v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
+                  :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
+                >
+                  {{ slaBadgeLabel(chat) }}
+                </span>
               </div>
               
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
@@ -1091,6 +1146,12 @@ const filteredUnassignChatsByCompany = computed(() => {
                   style="min-width: 20px; height: 18px;">
                   {{ chat.unread_count }}
                 </span>
+                <span
+                  v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
+                  :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
+                >
+                  {{ slaBadgeLabel(chat) }}
+                </span>
               </div>
 
              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
@@ -1171,6 +1232,15 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </svg>
               </button>
 
+              <div
+                v-if="(selectedChat?.assigned_agent_id === auth_user.id || selectedChat?.assigned_agent_id == null) && slaBadgeLabel(selectedChat)"
+                :class="[
+                  'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
+                  slaBadgeClass(selectedChat)
+                ]"
+              >
+                {{ slaBadgeLabel(selectedChat) }}
+              </div>
               
               <div :class="[
                 'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
@@ -1625,6 +1695,12 @@ const filteredUnassignChatsByCompany = computed(() => {
                   style="min-width: 20px; height: 18px;">
                   {{ chat.unread_count }}
                 </span>
+                <span
+                  v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
+                  :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
+                >
+                  {{ slaBadgeLabel(chat) }}
+                </span>
               </div>
            
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
@@ -1722,6 +1798,12 @@ const filteredUnassignChatsByCompany = computed(() => {
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
                   style="min-width: 20px; height: 18px;">
                   {{ chat.unread_count }}
+                </span>
+                <span
+                  v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
+                  :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
+                >
+                  {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
