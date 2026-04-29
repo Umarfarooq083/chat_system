@@ -733,20 +733,20 @@ const removeRegistration = (index) => {
 
       <!-- Input area -->
       <div  class="border-t p-2">
-        <!-- Chat Closed Overlay -->
-        <div v-if="chatClosed" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
-          <div class="text-center">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400">
-              <path d="M18 6 6 18" />
-              <path d="M6 6l12 12" />
-            </svg>
-            <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
-            <p class="text-xs text-slate-400 mt-1">No further messages can be sent.</p>
-            <button type="button" class="btn btn-success btn-sm mt-2" @click="startNewChat">
-              New Chat
-            </button>
-          </div>
-        </div>
+         <!-- Chat Closed Overlay -->
+         <div v-if="chatClosed" class="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
+           <div class="text-center">
+             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400">
+               <path d="M18 6 6 18" />
+               <path d="M6 6l12 12" />
+             </svg>
+             <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
+             <p class="text-xs text-slate-400 mt-1">No further messages can be sent.</p>
+             <button type="button" class="btn btn-success btn-sm mt-4" @click="startNewChat">
+               New Chat
+             </button>
+           </div>
+         </div>
 
         <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(item, index) in attachedFiles" :key="index"

@@ -21,6 +21,10 @@
         .send { border: 0; border-radius: 10px; padding: 10px 14px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
         .send:disabled { opacity: .6; cursor: not-allowed; }
         .new-chat { background: #16a34a; }
+        .btn { border: 0; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .btn-sm { padding: 4px 8px; font-size: 12px; }
+        .btn-success { background: #16a34a; color: #fff; }
+        .btn-success:hover { background: #15803d; }
         .attach-btn { border: 1px solid #d1d5db; border-radius: 20px; padding: 7px 13px 7px 14px; background: #fff; cursor: pointer; font-size: 14px; }
         .hint { padding: 10px 12px; color: #6b7280; font-size: 12px; }
         .prechat-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #ecfeff; }
@@ -36,6 +40,22 @@
         .attachment { display: flex; align-items: center; gap: 8px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; margin: 8px; margin-bottom: 0; }
         .attachment img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
         .attachment .remove { cursor: pointer; color: #ef4444; font-weight: bold; }
+        .chat-closed-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            padding-left: 77px;
+            margin-top: 53px;
+        }
     </style>
 
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
@@ -49,6 +69,17 @@
         <button class="btn" id="closeBtn" type="button">-</button>
     </div>
     <div class="body" id="messages"></div>
+    <div class="chat-closed-overlay" id="chatClosedOverlay" style="display: none;">
+        <div class="text-center">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400" style="color: #94a3b8;">
+                <path d="M18 6 6 18" />
+                <path d="M6 6l12 12" />
+            </svg>
+            <div style="font-weight: 600; color: #475569; font-size: 14px; margin-bottom: 4px;">Chat Closed</div>
+            <div style="color: #64748b; font-size: 12px; margin-bottom: 12px;">No further messages can be sent.</div>
+            <button class="btn btn-success btn-sm new-chat" id="newChatBtnOverlay" type="button" style="margin-top: 16px;">New Chat</button>
+        </div>
+    </div>
     <div class="prechat-form" id="prechatForm">
         <div class="hint" style="color: #0e7490; font-weight: 600;">To start chat, please provide:</div>
         <div class="form-row">
@@ -84,7 +115,7 @@
         <input class="input" id="text" placeholder="Type a message…" autocomplete="off">
         <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
         <button class="send" id="sendBtn" type="button" disabled>Send</button>
-        <button class="send new-chat" id="newChatBtn" type="button" style="display: none;">New Chat</button>
+        <button class="btn btn-success btn-sm mt-2 new-chat" id="newChatBtn" type="button" style="display: none;">New Chat</button>
     </div>
 </div>
 
@@ -337,20 +368,25 @@
         updateSendButton();
     }
 
-    function setChatClosed(isClosed) {
-        chatClosed = isClosed === true;
+     function setChatClosed(isClosed) {
+         chatClosed = isClosed === true;
 
-        newChatBtn.style.display = chatClosed ? 'inline-flex' : 'none';
-        sendBtn.style.display = chatClosed ? 'none' : 'inline-flex';
-        textEl.style.display = chatClosed ? 'none' : 'block';
-        attachBtn.style.display = chatClosed ? 'none' : 'inline-flex';
+         const overlay = document.getElementById('chatClosedOverlay');
+         if (overlay) {
+             overlay.style.display = chatClosed ? 'flex' : 'none';
+         }
 
-        if (chatClosed) {
-            removeAttachment();
-        }
+         newChatBtn.style.display = chatClosed ? 'inline-flex' : 'none';
+         sendBtn.style.display = chatClosed ? 'none' : 'inline-flex';
+         textEl.style.display = chatClosed ? 'none' : 'block';
+         attachBtn.style.display = chatClosed ? 'none' : 'inline-flex';
 
-        updateFormVisibility();
-    }
+         if (chatClosed) {
+             removeAttachment();
+         }
+
+         updateFormVisibility();
+     }
 
     function applyChatPayload(data) {
         chatId = data.chat.id;
@@ -835,9 +871,11 @@
         e.target.value = '';
     });
 
-    sendBtn.addEventListener('click', send);
-    newChatBtn.addEventListener('click', startNewChat);
-    prechatSubmitBtn.addEventListener('click', submitPrechat);
+     sendBtn.addEventListener('click', send);
+     newChatBtn.addEventListener('click', startNewChat);
+     const newChatBtnOverlay = document.getElementById('newChatBtnOverlay');
+     if (newChatBtnOverlay) newChatBtnOverlay.addEventListener('click', startNewChat);
+     prechatSubmitBtn.addEventListener('click', submitPrechat);
     submitInfoBtn.addEventListener('click', submitInfo);
     cancelInfoBtn.addEventListener('click', cancelInfo);
     if (addRegistrationNoBtn) addRegistrationNoBtn.addEventListener('click', addRegistrationInput);
