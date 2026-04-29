@@ -9,6 +9,9 @@ use App\Http\Controllers\ChatWidgetController;
 Route::post('/chat', [ChatController::class, 'externalCreateChat'])
     ->middleware(CheckChatToken::class);
 
+Route::post('/chat/new', [ChatController::class, 'externalNewChat'])
+    ->middleware(CheckChatToken::class);
+
 Route::post('/message', [ChatController::class, 'externalSendMessage'])
     ->middleware(CheckChatToken::class);
 
@@ -20,6 +23,7 @@ Route::post('/chat/read', [ChatController::class, 'externalMarkVisitorRead'])
 
 Route::prefix('widget')->middleware('throttle:60,1')->group(function () {
     Route::post('/chat', [ChatWidgetController::class, 'createChat']);
+    Route::post('/chat/new', [ChatWidgetController::class, 'newChat']);
     Route::post('/message', [ChatWidgetController::class, 'sendMessage']);
     Route::post('/chat/ping', [ChatWidgetController::class, 'ping']);
     Route::post('/chat/read', [ChatWidgetController::class, 'markRead']);

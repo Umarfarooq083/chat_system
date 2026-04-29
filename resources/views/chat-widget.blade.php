@@ -20,6 +20,7 @@
         .input { flex: 1; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 12px; font-size: 13px; outline: none; }
         .send { border: 0; border-radius: 10px; padding: 10px 14px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
         .send:disabled { opacity: .6; cursor: not-allowed; }
+        .new-chat { background: #16a34a; }
         .attach-btn { border: 1px solid #d1d5db; border-radius: 20px; padding: 7px 13px 7px 14px; background: #fff; cursor: pointer; font-size: 14px; }
         .hint { padding: 10px 12px; color: #6b7280; font-size: 12px; }
         .prechat-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #ecfeff; }
@@ -83,6 +84,7 @@
         <input class="input" id="text" placeholder="Type a message…" autocomplete="off">
         <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
         <button class="send" id="sendBtn" type="button" disabled>Send</button>
+        <button class="send new-chat" id="newChatBtn" type="button" style="display: none;">New Chat</button>
     </div>
 </div>
 
@@ -99,6 +101,7 @@
     const sendBtn = document.getElementById('sendBtn');
     const attachBtn = document.getElementById('attachBtn');
     const fileInput = document.getElementById('fileInput');
+    const newChatBtn = document.getElementById('newChatBtn');
     const prechatFormEl = document.getElementById('prechatForm');
     const prechatNameEl = document.getElementById('prechatName');
     const prechatPhoneEl = document.getElementById('prechatPhone');
@@ -138,6 +141,7 @@
     let urlTrackingSetup = false;
     let agentLastReadAt = null;
     let visitorLastReadAt = null;
+    let chatClosed = false;
 
     function getRegistrationNumbers() {
         if (!registrationNoListEl) return [];
@@ -306,6 +310,10 @@
     }
 
     function updateFormVisibility() {
+        if (chatClosed) {
+            showPrechatForm = false;
+            showUserForm = false;
+        }
         if (showPrechatForm) {
             prechatFormEl.classList.add('show');
         } else {
@@ -317,7 +325,7 @@
             infoFormEl.classList.remove('show');
         }
 
-        const blockComposer = showPrechatForm === true;
+        const blockComposer = showPrechatForm === true || chatClosed === true;
         textEl.disabled = blockComposer;
         attachBtn.disabled = blockComposer;
         fileInput.disabled = blockComposer;
@@ -327,6 +335,57 @@
             removeAttachment();
         }
         updateSendButton();
+    }
+
+    function setChatClosed(isClosed) {
+        chatClosed = isClosed === true;
+
+        newChatBtn.style.display = chatClosed ? 'inline-flex' : 'none';
+        sendBtn.style.display = chatClosed ? 'none' : 'inline-flex';
+        textEl.style.display = chatClosed ? 'none' : 'block';
+        attachBtn.style.display = chatClosed ? 'none' : 'inline-flex';
+
+        if (chatClosed) {
+            removeAttachment();
+        }
+
+        updateFormVisibility();
+    }
+
+    function applyChatPayload(data) {
+        chatId = data.chat.id;
+        agentLastReadAt = data.chat?.agent_last_read_at || null;
+        visitorLastReadAt = data.chat?.visitor_last_read_at || null;
+
+        messagesEl.innerHTML = '';
+        renderedMessageIds.clear();
+        lastId = 0;
+
+        showPrechatForm = !!data.chat?.prechat_required;
+        showUserForm = false;
+
+        (data.messages || []).forEach(m => {
+            renderMessage(m);
+            lastId = Math.max(lastId, Number(m.id || 0));
+            if (m.message_type === 'user_info_request') {
+                showUserForm = true;
+            }
+            if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
+                showUserForm = false;
+            }
+            if (m.message_type === 'prechat_info_request') {
+                showPrechatForm = true;
+            }
+            if (m.message_type === 'prechat_info_response' && m.sender_type === 'visitor') {
+                showPrechatForm = false;
+            }
+        });
+
+        setChatClosed((data.chat?.status || '') === 'close');
+        scrollToBottom();
+
+        initPusher();
+        subscribeToChatChannel(chatId);
     }
 
     function scrollToBottom() {
@@ -425,41 +484,48 @@
             }
             const data = await response.json();
 
-            chatId = data.chat.id;
-            agentLastReadAt = data.chat?.agent_last_read_at || null;
-            visitorLastReadAt = data.chat?.visitor_last_read_at || null;
-            messagesEl.innerHTML = '';
-            renderedMessageIds.clear(); // Clear previous message IDs
-            showPrechatForm = !!data.chat?.prechat_required;
-            (data.messages || []).forEach(m => {
-                renderMessage(m);
-                lastId = Math.max(lastId, Number(m.id || 0));
-                if (m.message_type === 'user_info_request') {
-                    showUserForm = true;
-                }
-                if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
-                    showUserForm = false;
-                }
-                if (m.message_type === 'prechat_info_request') {
-                    showPrechatForm = true;
-                }
-                if (m.message_type === 'prechat_info_response' && m.sender_type === 'visitor') {
-                    showPrechatForm = false;
-                }
-            });
-            updateFormVisibility();
-            scrollToBottom();
+            applyChatPayload(data);
             
             // initial ping to mark online
             await pingChat(true);
             await markVisitorRead();
             setupUrlTracking();
-
-            // Initialize Pusher and subscribe to chat channel
-            initPusher();
-            subscribeToChatChannel(chatId);
         } catch (error) {
             messagesEl.innerHTML = `<div class="hint">Failed to connect. Please refresh.<br>${String(error.message || error)}</div>`;
+        }
+    }
+
+    async function startNewChat() {
+        newChatBtn.disabled = true;
+        try {
+            const previousVisitorId = visitorId;
+            const nextVisitorId = uuid();
+
+            const response = await fetch(`${apiBase}/chat/new`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    visitor_id: nextVisitorId,
+                    previous_visitor_id: previousVisitorId,
+                    company_id: companyId,
+                    current_url: document.referrer || null,
+                    referrer_url: document.referrer || null,
+                }),
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                throw new Error(text || `Request failed (${response.status})`);
+            }
+            const data = await response.json();
+            visitorId = nextVisitorId;
+            localStorage.setItem(storageKey, visitorId);
+            applyChatPayload(data);
+            await pingChat(true);
+            await markVisitorRead();
+        } catch (e) {
+            alert('Failed to start a new chat. Please try again.');
+        } finally {
+            newChatBtn.disabled = false;
         }
     }
 
@@ -475,7 +541,6 @@
         if (!hasText && !hasFile) return;
         sendBtn.disabled = true;
         try {
-        console.log(document, 'umarfarooq');
             const formData = new FormData();
             formData.append('visitor_id', visitorId);
             formData.append('chat_id', chatId);
@@ -490,7 +555,26 @@
                 body: formData,
             });
             if (!response.ok) {
-                throw new Error(`Request failed (${response.status}): ${response.statusText}`);
+                let serverMessage = '';
+                try {
+                    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+                    if (contentType.includes('application/json')) {
+                        const json = await response.json();
+                        serverMessage = (json && json.message) ? String(json.message) : '';
+                    } else {
+                        serverMessage = String(await response.text());
+                    }
+                } catch (e) {
+                    serverMessage = '';
+                }
+
+                if (response.status === 403 && /closed/i.test(serverMessage || '')) {
+                    setChatClosed(true);
+                    alert('This chat has been closed. Click “New Chat” to start again.');
+                    return;
+                }
+
+                throw new Error(serverMessage || `Request failed (${response.status}): ${response.statusText}`);
             }
             const data = await response.json();
 
@@ -502,6 +586,8 @@
                 lastId = Math.max(lastId, Number(data.message.id || 0));
                 scrollToBottom();
             }
+        } catch (e) {
+            alert(String(e.message || 'Failed to send. Please try again.'));
         } finally {
             sendBtn.disabled = false;
             textEl.focus();
@@ -675,7 +761,7 @@
     }
 
     function updateSendButton() {
-        if (showPrechatForm) {
+        if (showPrechatForm || chatClosed) {
             sendBtn.disabled = true;
             return;
         }
@@ -750,6 +836,7 @@
     });
 
     sendBtn.addEventListener('click', send);
+    newChatBtn.addEventListener('click', startNewChat);
     prechatSubmitBtn.addEventListener('click', submitPrechat);
     submitInfoBtn.addEventListener('click', submitInfo);
     cancelInfoBtn.addEventListener('click', cancelInfo);

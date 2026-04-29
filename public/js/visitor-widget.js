@@ -10,6 +10,17 @@
   var PUSHER_KEY  = cfg.pusherKey   || '';
   var PUSHER_CLUSTER = cfg.pusherCluster || 'ap2';
 
+  var VISITOR_ID_KEY = (cfg.visitorIdStorageKey || 'chat_visitor_id');
+  var visitorId = (cfg.visitorId || '').toString().trim();
+  if (!visitorId) {
+    try { visitorId = localStorage.getItem(VISITOR_ID_KEY) || ''; } catch (e) { visitorId = ''; }
+  }
+  if (!visitorId) {
+    if (window.crypto && crypto.randomUUID) visitorId = crypto.randomUUID();
+    else visitorId = 'v-' + Math.random().toString(16).slice(2) + '-' + Date.now().toString(16);
+  }
+  try { localStorage.setItem(VISITOR_ID_KEY, visitorId); } catch (e) {}
+
   var chatId      = null;
   var lastSentUrl = null;
   var urlTrackingSetup = false;
@@ -24,6 +35,7 @@
     message:       '',
     attachedFile:  null,   // { file, preview, isImage }
     showUserForm:  false,
+    chatClosed:    false,
     sendError:     '',
     userForm:      { phone: '', customerName: '', registrationNo: '', email: '' }
   };
@@ -159,6 +171,10 @@
     '  border-radius:20px; padding:7px 14px; font-size:13px; cursor:pointer; flex-shrink:0;',
     '}',
     '#bgc-send-btn:disabled { opacity:.5; cursor:not-allowed; }',
+    '#bgc-new-chat-btn {',
+    '  background:#16a34a; color:#fff; border:none;',
+    '  border-radius:20px; padding:7px 14px; font-size:13px; cursor:pointer; flex-shrink:0;',
+    '}',
   ].join('\n');
   document.head.appendChild(style);
 
@@ -211,6 +227,7 @@
     '    <button id="bgc-attach-btn" title="Attach file"><i class="fa fa-paperclip"></i></button>',
     '    <input id="bgc-text-input" type="text" placeholder="Type a message..." />',
     '    <button id="bgc-send-btn">Send</button>',
+    '    <button id="bgc-new-chat-btn" style="display:none">New Chat</button>',
     '  </div>',
 
     '</div>',
@@ -239,6 +256,7 @@
   var elAttachBtn   = document.getElementById('bgc-attach-btn');
   var elTextInput   = document.getElementById('bgc-text-input');
   var elSendBtn     = document.getElementById('bgc-send-btn');
+  var elNewChatBtn  = document.getElementById('bgc-new-chat-btn');
 
   /* ─────────────────────────────────────────────
      HELPERS
@@ -383,11 +401,12 @@
       method: 'POST',
       headers: apiHeaders(),
       credentials: 'include',
-      body: JSON.stringify({ current_url: window.location.href })
+      body: JSON.stringify({ visitor_id: visitorId, current_url: window.location.href })
     })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       chatId = data.chat.id;
+      setClosedUI(data.chat && data.chat.status === 'close');
       renderAllMessages(data.messages);
 
       if (!data.messages || !data.messages.length) {
@@ -427,7 +446,7 @@
   function pingChat(force) {
     if (!chatId) return;
     var currentUrl = window.location.href;
-    var body = { chat_id: chatId };
+    var body = { chat_id: chatId, visitor_id: visitorId };
     if (force || lastSentUrl !== currentUrl) {
       body.current_url = currentUrl;
       lastSentUrl = currentUrl;
@@ -443,6 +462,7 @@
   /* Send text message */
   function sendMessage() {
     if (!chatId) return;
+    if (state.chatClosed) return;
     var text = elTextInput.value.trim();
     var file = state.attachedFile;
     if (!text && !file) return;
@@ -458,6 +478,7 @@
     if (savedFile) {
       var fd = new FormData();
       fd.append('chat_id', chatId);
+      fd.append('visitor_id', visitorId);
       fd.append('message', savedText);
       fd.append('sender_type', 'visitor');
       fd.append('attachments', savedFile.file);
@@ -476,11 +497,24 @@
         method: 'POST',
         headers: apiHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ chat_id: chatId, message: savedText, sender_type: 'visitor' })
+        body: JSON.stringify({ chat_id: chatId, visitor_id: visitorId, message: savedText, sender_type: 'visitor' })
       });
     }
 
-    doSend.catch(function (err) {
+    doSend
+    .then(function (r) {
+      if (!r || r.ok) return null;
+      return r.json().catch(function () { return null; }).then(function (payload) {
+        var msg = payload && payload.message ? String(payload.message) : ('Request failed (' + r.status + ')');
+        if (r.status === 403 && /closed/i.test(msg)) {
+          setClosedUI(true);
+          showError('This chat has been closed. Click "New Chat" to start again.');
+          return null;
+        }
+        throw new Error(msg);
+      });
+    })
+    .catch(function (err) {
       console.error('[BGC] Send failed', err);
       showError('Failed to send. Please try again.');
       elTextInput.value = savedText;
@@ -514,6 +548,7 @@
       credentials: 'include',
       body: JSON.stringify({
         chat_id:          chatId,
+        visitor_id:       visitorId,
         message:          lines.join('\n'),
         sender_type:      'visitor',
         message_type:     'user_info_response',
@@ -659,6 +694,64 @@
     elBtn.style.display = 'flex';
   }
 
+  function generateVisitorId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'v-' + Math.random().toString(16).slice(2) + '-' + Date.now().toString(16);
+  }
+
+  function setClosedUI(isClosed) {
+    state.chatClosed = !!isClosed;
+
+    elNewChatBtn.style.display = state.chatClosed ? 'inline-flex' : 'none';
+    elSendBtn.style.display = state.chatClosed ? 'none' : 'inline-flex';
+
+    elTextInput.disabled = state.chatClosed;
+    elAttachBtn.disabled = state.chatClosed;
+    elFileInput.disabled = state.chatClosed;
+
+    if (state.chatClosed) {
+      clearFilePreview();
+      elTextInput.value = '';
+    }
+
+    updateSendBtn();
+  }
+
+  function startNewChat() {
+    var previousVisitorId = visitorId;
+    var nextVisitorId = generateVisitorId();
+
+    apiFetch('/chat/new', {
+      method: 'POST',
+      headers: apiHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ visitor_id: nextVisitorId, previous_visitor_id: previousVisitorId, current_url: window.location.href })
+    })
+    .then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return null; }).then(function (p) {
+          throw new Error((p && p.message) ? String(p.message) : ('Request failed (' + r.status + ')'));
+        });
+      }
+      return r.json();
+    })
+    .then(function (data) {
+      visitorId = nextVisitorId;
+      try { localStorage.setItem(VISITOR_ID_KEY, visitorId); } catch (e) {}
+
+      chatId = data.chat.id;
+      renderAllMessages(data.messages);
+      hideError();
+      hideUserFormEl();
+      setClosedUI(false);
+      pingChat(true);
+    })
+    .catch(function (err) {
+      console.error('[BGC] New chat failed', err);
+      showError('Failed to start a new chat. Please try again.');
+    });
+  }
+
   /* ─────────────────────────────────────────────
      EVENT LISTENERS
   ───────────────────────────────────────────── */
@@ -682,6 +775,7 @@
   });
 
   elSendBtn.addEventListener('click', sendMessage);
+  elNewChatBtn.addEventListener('click', startNewChat);
 
   elSubmitInfo.addEventListener('click', submitUserInfo);
   elCancelInfo.addEventListener('click', function () {
@@ -692,6 +786,10 @@
 
   /* keep send button disabled when nothing to send */
   function updateSendBtn() {
+    if (state.chatClosed) {
+      elSendBtn.disabled = true;
+      return;
+    }
     var hasText = elTextInput.value.trim() !== '';
     var hasFile = !!state.attachedFile;
     elSendBtn.disabled = !hasText && !hasFile;

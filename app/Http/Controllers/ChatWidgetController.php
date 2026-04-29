@@ -15,6 +15,16 @@ class ChatWidgetController extends Controller
 {
     private const VISITOR_ID_PATTERN = '/^[a-zA-Z0-9._-]{8,100}$/';
 
+    private function validateVisitorId(string $visitorId)
+    {
+        $visitorId = trim($visitorId);
+        if ($visitorId === '' || preg_match(self::VISITOR_ID_PATTERN, $visitorId) !== 1) {
+            return response()->json(['message' => 'Invalid visitor_id'], 422);
+        }
+
+        return $visitorId;
+    }
+
     private function createWelcomeMessageIfNeeded(Chat $chat): void
     {
         if ($chat->messages()->exists()) {
@@ -72,23 +82,29 @@ class ChatWidgetController extends Controller
             'referrer_url' => 'nullable|string|max:2048',
         ]);
 
-        $visitorId = trim($validated['visitor_id']);
-        if ($visitorId === '' || preg_match(self::VISITOR_ID_PATTERN, $visitorId) !== 1) {
-            return response()->json(['message' => 'Invalid visitor_id'], 422);
+        $visitorId = $this->validateVisitorId($validated['visitor_id']);
+        if ($visitorId instanceof \Illuminate\Http\JsonResponse) {
+            return $visitorId;
         }
 
         $companyId = $validated['company_id'];
 
-        $chat = Chat::firstOrCreate(
-            ['visitor_id' => $visitorId, 'company_id' => $companyId ?: null],
-            [
+        $chat = Chat::query()
+            ->where('visitor_id', $visitorId)
+            ->where('company_id', $companyId ?: null)
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $chat) {
+            $chat = Chat::create([
+                'visitor_id' => $visitorId,
+                'company_id' => $companyId ?: null,
                 'status' => 'open',
                 'last_message_at' => now(),
                 'agent_last_read_at' => now(),
                 'visitor_last_read_at' => now(),
-                'company_id' => $companyId ?: null,
-            ]
-        );
+            ]);
+        }
         $this->createWelcomeMessageIfNeeded($chat);
 
         $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
@@ -123,6 +139,84 @@ class ChatWidgetController extends Controller
             'chat' => [
                 'id' => $chat->id,
                 'visitor_id' => $chat->visitor_id,
+                'status' => $chat->status,
+                'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
+                'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
+                'prechat_submitted_at' => optional($chat->prechat_submitted_at)->toIso8601String(),
+                'prechat_required' => $prechatRequired,
+            ],
+            'messages' => $messages->map(fn (Message $m) => $this->serializeMessage($m))->values(),
+        ]);
+    }
+
+    public function newChat(Request $request)
+    {
+        $validated = $request->validate([
+            'visitor_id' => 'required|string|max:100',
+            'previous_visitor_id' => 'nullable|string|max:100',
+            'company_id' => 'required|string|max:36',
+            'current_url' => 'nullable|string|max:2048',
+            'referrer_url' => 'nullable|string|max:2048',
+        ]);
+
+        $visitorId = $this->validateVisitorId($validated['visitor_id']);
+        if ($visitorId instanceof \Illuminate\Http\JsonResponse) {
+            return $visitorId;
+        }
+
+        $previousVisitorId = null;
+        if (array_key_exists('previous_visitor_id', $validated) && $validated['previous_visitor_id'] !== null) {
+            $previousVisitorId = $this->validateVisitorId($validated['previous_visitor_id']);
+            if ($previousVisitorId instanceof \Illuminate\Http\JsonResponse) {
+                return $previousVisitorId;
+            }
+        }
+
+        $companyId = $validated['company_id'];
+
+        $chat = Chat::create([
+            'visitor_id' => $visitorId,
+            'company_id' => $companyId ?: null,
+            'status' => 'open',
+            'last_message_at' => now(),
+            'agent_last_read_at' => now(),
+            'visitor_last_read_at' => now(),
+        ]);
+
+        $this->createWelcomeMessageIfNeeded($chat);
+
+        $hasBasicInfo = is_string($chat->phone) && trim($chat->phone) !== '' && is_string($chat->customer_name) && trim($chat->customer_name) !== '';
+        $prechatRequired = $chat->prechat_submitted_at === null && $chat->user_info_submitted_at === null && ! $hasBasicInfo;
+        if (! $prechatRequired && $chat->prechat_submitted_at === null && ($chat->user_info_submitted_at !== null || $hasBasicInfo)) {
+            $chat->prechat_submitted_at = now();
+        }
+
+        $currentUrl = $validated['current_url'] ?? null;
+        $chat->last_activity = now();
+        $chat->visitor_last_read_at = now();
+        if (! $chat->ip) {
+            $chat->ip = $request->ip();
+        }
+        if ($currentUrl) {
+            $chat->current_url = $currentUrl;
+        } elseif (! empty($validated['referrer_url'])) {
+            $chat->current_url = $validated['referrer_url'];
+        }
+        $chat->save();
+
+        $messages = $chat->messages()->orderByDesc('id')->limit(20)->get()->reverse()->values();
+
+        try {
+            broadcast(new NewChat($chat));
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return response()->json([
+            'chat' => [
+                'id' => $chat->id,
+                'visitor_id' => $chat->visitor_id,
+                'status' => $chat->status,
                 'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
                 'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
                 'prechat_submitted_at' => optional($chat->prechat_submitted_at)->toIso8601String(),
