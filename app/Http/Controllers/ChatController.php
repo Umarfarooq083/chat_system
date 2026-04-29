@@ -81,6 +81,12 @@ class ChatController extends Controller
 
         $phone = is_string($phone) ? trim($phone) : null;
         $customerName = is_string($customerName) ? trim($customerName) : null;
+        if (is_array($registrationNo)) {
+            $registrationNo = collect($registrationNo)
+                ->filter(fn ($v) => is_string($v))
+                ->map(fn ($v) => trim($v))
+                ->first(fn ($v) => $v !== '');
+        }
         $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
         $email = is_string($email) ? trim($email) : null;
         if ($email === '') {
@@ -180,7 +186,8 @@ class ChatController extends Controller
             'attachments' => 'nullable|file|max:20480',
             'phone' => 'nullable|string|max:50',
             'customer_name' => 'nullable|string|max:255',
-            'registration_no' => 'nullable|string|max:100',
+            'registration_no' => 'nullable',
+            'registration_no.*' => 'nullable|string|max:100',
             'email' => 'nullable|string|max:255',
         ]);
 
@@ -219,14 +226,69 @@ class ChatController extends Controller
             $this->applyVisitorUserInfoToChat($request, $chat);
 
             $chat_message = [];
+            $registrationNumbers = $request->input('registration_no');
+            if (is_string($registrationNumbers)) {
+                $registrationNumbers = [trim($registrationNumbers)];
+            }
+            if (! is_array($registrationNumbers)) {
+                $registrationNumbers = [];
+            }
+            $registrationNumbers = array_values(array_filter(array_map(function ($value) {
+                return is_string($value) ? trim($value) : null;
+            }, $registrationNumbers), function ($value) {
+                return is_string($value) && $value !== '';
+            }));
 
             if ($request->message_type == 'user_info_response') {
+                // If multiple registration numbers are submitted, treat each one as its own message row.
+                if ($request->sender_type === 'visitor' && count($registrationNumbers) > 1) {
+                    $createdMessages = [];
+
+                    foreach ($registrationNumbers as $registrationNo) {
+                        $createdMessages[] = Message::create([
+                            'chat_id' => $chat->id,
+                            'sender_type' => $request->sender_type,
+                            'message' => json_encode([
+                                'type' => 'user_info_response',
+                                'name' => $request->customer_name,
+                                'email' => $request->email,
+                                'phone' => $request->phone,
+                                'registration_no' => $registrationNo,
+                            ]),
+                            'message_type' => $request->message_type,
+                            'attachments' => null,
+                        ]);
+                    }
+
+                    $last = end($createdMessages);
+                    if ($last) {
+                        $chat->last_message_at = $last->created_at;
+                        if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
+                            $chat->first_visitor_message_at = $last->created_at;
+                        }
+                        if (! $chat->ip) {
+                            $chat->ip = $request->ip();
+                        }
+                        $currentUrl = $this->resolveCurrentUrl($request);
+                        if ($currentUrl) {
+                            $chat->current_url = $currentUrl;
+                        }
+                        $chat->save();
+
+                        foreach ($createdMessages as $created) {
+                            broadcast(new MessageSent($created));
+                        }
+                    }
+
+                    return response()->noContent();
+                }
+
                 $chat_message = [
                     'type' => 'user_info_response',
                     'name' => $request->customer_name,
                     'email' => $request->email,
                     'phone' => $request->phone,
-                    'registration_no' => $request->registration_no,
+                    'registration_no' => $registrationNumbers[0] ?? $request->registration_no,
                 ];
             } elseif ($request->message_type == 'prechat_info_response') {
                 $chat_message = [
@@ -515,7 +577,8 @@ class ChatController extends Controller
             'attachments' => 'nullable|file|max:20480',
             'phone' => 'nullable|string|max:50',
             'customer_name' => 'nullable|string|max:255',
-            'registration_no' => 'nullable|string|max:100',
+            'registration_no' => 'nullable',
+            'registration_no.*' => 'nullable|string|max:100',
             'email' => 'nullable|string|max:255',
         ]);
 
@@ -550,6 +613,64 @@ class ChatController extends Controller
 
             $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
+
+            $registrationNumbers = $request->input('registration_no');
+            if (is_string($registrationNumbers)) {
+                $registrationNumbers = [trim($registrationNumbers)];
+            }
+            if (! is_array($registrationNumbers)) {
+                $registrationNumbers = [];
+            }
+            $registrationNumbers = array_values(array_filter(array_map(function ($value) {
+                return is_string($value) ? trim($value) : null;
+            }, $registrationNumbers), function ($value) {
+                return is_string($value) && $value !== '';
+            }));
+
+            if (
+                $request->sender_type === 'visitor'
+                && $request->message_type === 'user_info_response'
+                && count($registrationNumbers) > 1
+            ) {
+                $createdMessages = [];
+                foreach ($registrationNumbers as $registrationNo) {
+                    $createdMessages[] = Message::create([
+                        'chat_id' => $chat->id,
+                        'sender_type' => $request->sender_type,
+                        'message' => json_encode([
+                            'type' => 'user_info_response',
+                            'name' => $request->customer_name,
+                            'email' => $request->email,
+                            'phone' => $request->phone,
+                            'registration_no' => $registrationNo,
+                        ]),
+                        'message_type' => $request->message_type,
+                        'attachments' => null,
+                    ]);
+                }
+
+                $last = end($createdMessages);
+                if ($last) {
+                    $chat->last_message_at = $last->created_at;
+                    if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
+                        $chat->first_visitor_message_at = $last->created_at;
+                    }
+                    if (! $chat->ip) {
+                        $chat->ip = $request->ip();
+                    }
+                    $currentUrl = $this->resolveCurrentUrl($request);
+                    if ($currentUrl) {
+                        $chat->current_url = $currentUrl;
+                    }
+                    $chat->save();
+
+                    foreach ($createdMessages as $created) {
+                        broadcast(new MessageSent($created));
+                    }
+                }
+
+                return response()->noContent();
+            }
 
             $chat_message = '';
             $filePath = null;

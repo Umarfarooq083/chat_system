@@ -21,7 +21,7 @@ const chatReadState = ref({
 const userForm = ref({
   phone: '',
   customerName: '',
-  registrationNo: '',
+  registrationNo: [''],
   email: ''
 })
 const prechatForm = ref({
@@ -387,10 +387,12 @@ const submitUserInfo = async () => {
 
   const phone = (userForm.value.phone || '').trim()
   const customerName = (userForm.value.customerName || '').trim()
-  const registrationNo = (userForm.value.registrationNo || '').trim()
+  const registrationNumbers = Array.isArray(userForm.value.registrationNo)
+    ? userForm.value.registrationNo.map(v => (v || '').toString().trim()).filter(v => v !== '')
+    : []
   const email = (userForm.value.email || '').trim()
 
-  if (!phone || !customerName || !registrationNo) {
+  if (!phone || !customerName || registrationNumbers.length === 0) {
     sendError.value = 'Please fill in the required fields (Phone No, Customer Name, Registration No).'
     return
   }
@@ -399,7 +401,7 @@ const submitUserInfo = async () => {
     'User Information:',
     'Phone No: ' + phone,
     'Customer Name: ' + customerName,
-    'Registration No: ' + registrationNo,
+    'Registration No: ' + registrationNumbers.join(', '),
   ]
   if (email) lines.push('Email: ' + email)
   const userInfoMessage = lines.join('\n')
@@ -419,13 +421,13 @@ const submitUserInfo = async () => {
       message_type: 'user_info_response',
       phone,
       customer_name: customerName,
-      registration_no: registrationNo,
+      registration_no: registrationNumbers,
       email: email || null
     }, { headers })
      
     sendError.value = ''
     showUserForm.value = false
-    userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
+    userForm.value = { phone: '', customerName: '', registrationNo: [''], email: '' }
     await scrollToBottom()
   } catch (error) {
     console.error('Failed to send user info:', error)
@@ -445,8 +447,17 @@ const getUserInfo = (msg) => {
 
 const cancelUserInfo = () => {
   showUserForm.value = false
-  userForm.value = { phone: '', customerName: '', registrationNo: '', email: '' }
+  userForm.value = { phone: '', customerName: '', registrationNo: [''], email: '' }
 }
+
+const addRegistration = () => {
+  userForm.value.registrationNo.push('')
+}
+
+const removeRegistration = (index) => {
+  userForm.value.registrationNo.splice(index, 1)
+}
+
 </script>
 
 
@@ -610,21 +621,48 @@ const cancelUserInfo = () => {
           </div>
           <div class="col-6 mb-1">
             <input
-              v-model="userForm.registrationNo"
-              type="text"
-              required
-              placeholder="Registration No"
-              class="form-control form-control-sm"
-            />
-          </div>
-          <div class="col-6 mb-1">
-            <input
               v-model="userForm.email"
               type="email"
               placeholder="Email"
               class="form-control form-control-sm"
             />
           </div>
+          <div class="col-12 mb-1">
+            <div
+              class="d-flex mb-1"
+              v-for="(reg, index) in userForm.registrationNo"
+              :key="index"
+            >
+              <input
+                v-model="userForm.registrationNo[index]"
+                type="text"
+                required
+                placeholder="Registration No"
+                class="form-control form-control-sm me-1"
+              />
+
+              <!-- + button -->
+              <button
+                type="button"
+                class="btn btn-success btn-sm"
+                @click="addRegistration"
+                v-if="index === userForm.registrationNo.length - 1"
+              >
+                +
+              </button>
+
+              <!-- - button -->
+              <button
+                type="button"
+                class="btn btn-danger btn-sm ms-1"
+                @click="removeRegistration(index)"
+                v-if="userForm.registrationNo.length > 1"
+              >
+                -
+              </button>
+            </div>
+          </div>
+          
             <div class="col-md-12 mt-2">
             <div class="row gap-2 m-0 justify-content-end">
               <button
