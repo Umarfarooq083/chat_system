@@ -152,13 +152,15 @@
     }
 
     const storageKey = 'chat_widget_vid';
-    let visitorId = (typeof initialVisitorId === 'string' && initialVisitorId.trim() !== '') ? initialVisitorId.trim() : (localStorage.getItem(storageKey) || '');
+    const storedVisitorId = localStorage.getItem(storageKey) || '';
+    let visitorId = storedVisitorId.toString().trim();
+    if (!visitorId) {
+        visitorId = (typeof initialVisitorId === 'string' && initialVisitorId.trim() !== '') ? initialVisitorId.trim() : '';
+    }
     if (!visitorId) {
         visitorId = uuid();
-        localStorage.setItem(storageKey, visitorId);
-    } else {
-        localStorage.setItem(storageKey, visitorId);
     }
+    localStorage.setItem(storageKey, visitorId);
 
     let chatId = null;
     let lastId = 0;
