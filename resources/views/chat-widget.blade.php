@@ -97,15 +97,16 @@
             <input class="form-input" id="customerName" type="text" placeholder="Customer Name" required>
         </div>
         <div class="form-row">
+        <input class="form-input" id="email" type="email" placeholder="Email">
             <div id="registrationNoList" style="display: grid; gap: 8px;">
                 <div class="reg-row" style="display: flex; gap: 8px; align-items: center;">
                     <input class="form-input reg-input" type="text" placeholder="Registration No" required>
-                    <button class="form-btn secondary" id="addRegistrationNo" type="button" style="white-space: nowrap;">+ Add</button>
+                    <button class="form-btn secondary" id="addRegistrationNo" type="button" style="white-space: nowrap; background: green;">+</button>
                 </div>
             </div>
-            <input class="form-input" id="email" type="email" placeholder="Email">
+            
         </div>
-        <div class="form-row" style="justify-content: flex-end; gap: 8px;">
+        <div class="row" style="justify-content: flex-end; gap: 8px; padding-top:10px">
             <button class="form-btn secondary" id="cancelInfo" type="button">Cancel</button>
             <button class="form-btn primary" id="submitInfo" type="button">Submit</button>
         </div>
@@ -201,8 +202,11 @@
         const removeBtn = document.createElement('button');
         removeBtn.className = 'form-btn secondary';
         removeBtn.type = 'button';
-        removeBtn.textContent = 'Remove';
+        removeBtn.textContent = '-';
         removeBtn.style.whiteSpace = 'nowrap';
+        removeBtn.style.backgroundColor = 'red';
+        removeBtn.style.width = '31px';
+        removeBtn.style.fontSize = '15px';
         removeBtn.addEventListener('click', () => row.remove());
 
         row.appendChild(input);
@@ -231,7 +235,7 @@
         addBtn.className = 'form-btn secondary';
         addBtn.id = 'addRegistrationNo';
         addBtn.type = 'button';
-        addBtn.textContent = '+ Add';
+        addBtn.textContent = '+';
         addBtn.style.whiteSpace = 'nowrap';
         addBtn.addEventListener('click', addRegistrationInput);
 
@@ -844,8 +848,8 @@
         div.appendChild(span);
         
         const removeBtn = document.createElement('span');
-        removeBtn.className = 'remove';
-        removeBtn.textContent = '×';
+        removeBtn.className = '-';
+        removeBtn.textContent = '-';
         removeBtn.onclick = removeAttachment;
         div.appendChild(removeBtn);
         
