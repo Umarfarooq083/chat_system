@@ -9,8 +9,8 @@ const copied = ref(false)
 
 const embedCode = `
 <script
-    src="http://chat-system.test/chat-widget/embed.js"
-    data-chat-url="http://chat-system.test"
+    src="https://92.204.187.99:8000/chat-widget/embed.js"
+    data-chat-url="https://92.204.187.99:8000"
     data-position="right"
     data-title="Chat with us"
     data-color="#111827"
