@@ -344,6 +344,54 @@ const sendMessage = async () => {
   }
 }
 
+const uuid = () => {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID()
+  return 'v-' + Math.random().toString(16).slice(2) + '-' + Date.now().toString(16)
+}
+
+const startNewChat = async () => {
+  try {
+    const cfg = window.ChatConfig || {}
+    const apiBase = (cfg.apiBase || '').toString().trim()
+    const headers = {}
+    if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
+
+    const previousVisitorId = visitorId
+    const newVisitorId = apiBase ? uuid() : null
+
+    const url = apiBase ? (apiBase + '/chat/new') : '/visitor-chat/new'
+    const payload = { current_url: window.location.href }
+
+    if (apiBase) {
+      payload.visitor_id = newVisitorId
+      payload.previous_visitor_id = previousVisitorId
+    }
+
+    const response = await axios.post(url, payload, { headers })
+
+    chatId = response.data.chat.id
+    visitorId = response.data?.chat?.visitor_id || newVisitorId || null
+    chatReadState.value.agent_last_read_at = response.data?.chat?.agent_last_read_at || null
+    chatReadState.value.visitor_last_read_at = response.data?.chat?.visitor_last_read_at || null
+    messages.value = response.data.messages || []
+
+    chatClosed.value = false
+    showPrechatForm.value = false
+    showUserForm.value = false
+    sendError.value = ''
+    message.value = ''
+    clearAttachments()
+
+    await pingChat(true)
+    await markVisitorRead()
+    await scrollToBottom()
+    window.location.reload();
+  } catch (error) {
+    console.error('Failed to start new chat:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to start new chat. Please try again.')
+  }
+}
+
 const submitPrechatInfo = async () => {
   if (!chatId) return
 
@@ -685,17 +733,20 @@ const removeRegistration = (index) => {
 
       <!-- Input area -->
       <div  class="border-t p-2">
-        <!-- Chat Closed Overlay -->
-        <div v-if="chatClosed" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
-          <div class="text-center">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400">
-              <path d="M18 6 6 18" />
-              <path d="M6 6l12 12" />
-            </svg>
-            <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
-            <p class="text-xs text-slate-400 mt-1">No further messages can be sent.</p>
-          </div>
-        </div>
+         <!-- Chat Closed Overlay -->
+         <div v-if="chatClosed" class="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0;">
+           <div class="text-center">
+             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400">
+               <path d="M18 6 6 18" />
+               <path d="M6 6l12 12" />
+             </svg>
+             <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
+             <p class="text-xs text-slate-400 mt-1">No further messages can be sent.</p>
+             <button type="button" class="btn btn-success btn-sm mt-4" @click="startNewChat">
+               New Chat
+             </button>
+           </div>
+         </div>
 
         <div v-if="attachedFiles.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(item, index) in attachedFiles" :key="index"

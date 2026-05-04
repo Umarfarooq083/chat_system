@@ -150,6 +150,39 @@ function formatDuration(seconds) {
                     </div>
                 </div>
                 
+                 <!-- Unanswered Chats Table -->
+                <div v-if="stats.unanswered_chats" class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
+                    <div class="px-6 py-4 border-b border-red-100">
+                        <h3 class="text-lg font-semibold text-red-600">
+                            Unanswered Chats ({{ stats.unanswered_chats.total }})
+                        </h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-red-50 text-red-700 font-medium">
+                                <tr>
+                                    <th class="px-6 py-3">Chat ID</th>
+                                    <th class="px-6 py-3">First Message</th>
+                                    <th class="px-6 py-3">Created At</th>
+                                </tr>
+                            </thead>
+                            <!-- {{ stats.unanswered_chats.data }} -->
+                            <tbody class="divide-y divide-red-100">
+                                <tr v-for="chat in stats.unanswered_chats.data" :key="chat.chat_id">
+                                    <td class="px-6 py-4 text-gray-900">{{ chat.chat_id }}</td>
+                                    <!-- <td class="px-6 py-4 text-gray-600 truncate max-w-xs" v-if="typeof(JSON.parse(chat?.first_message)) === 'string'">{{ JSON.parse(chat?.first_message)?.name }}</td> -->
+                                    <td class="px-6 py-4 text-gray-600 truncate max-w-xs" >{{ chat?.first_message?.name ?? 'N/A' }}</td>
+                                   
+                                    <td class="px-6 py-4 text-gray-600">{{ formatDateTime(chat.created_at) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                          <Pagination :links="stats.unanswered_chats.links" />
+                    </div>
+                </div>
+                <div v-else class="bg-white overflow-hidden shadow-sm sm:rounded-lg p-6 text-center text-gray-500">
+                    All chats received an agent response.
+                </div>
                 <!-- Delayed Chats Table -->
                 <div v-if="stats.delayed_chats" class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                     <div class="px-6 py-4 border-b border-gray-200">
@@ -189,39 +222,7 @@ function formatDuration(seconds) {
                     No delayed chats found for the selected period.
                 </div>
 
-                <!-- Unanswered Chats Table -->
-                <div v-if="stats.unanswered_chats" class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="px-6 py-4 border-b border-red-100">
-                        <h3 class="text-lg font-semibold text-red-600">
-                            Unanswered Chats ({{ stats.unanswered_chats.total }})
-                        </h3>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left">
-                            <thead class="bg-red-50 text-red-700 font-medium">
-                                <tr>
-                                    <th class="px-6 py-3">Chat ID</th>
-                                    <th class="px-6 py-3">First Message</th>
-                                    <th class="px-6 py-3">Created At</th>
-                                </tr>
-                            </thead>
-                            <!-- {{ stats.unanswered_chats.data }} -->
-                            <tbody class="divide-y divide-red-100">
-                                <tr v-for="chat in stats.unanswered_chats.data" :key="chat.chat_id">
-                                    <td class="px-6 py-4 text-gray-900">{{ chat.chat_id }}</td>
-                                    <!-- <td class="px-6 py-4 text-gray-600 truncate max-w-xs" v-if="typeof(JSON.parse(chat?.first_message)) === 'string'">{{ JSON.parse(chat?.first_message)?.name }}</td> -->
-                                    <td class="px-6 py-4 text-gray-600 truncate max-w-xs" >{{ chat?.first_message?.name ?? 'N/A' }}</td>
-                                   
-                                    <td class="px-6 py-4 text-gray-600">{{ formatDateTime(chat.created_at) }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                          <Pagination :links="stats.unanswered_chats.links" />
-                    </div>
-                </div>
-                <div v-else class="bg-white overflow-hidden shadow-sm sm:rounded-lg p-6 text-center text-gray-500">
-                    All chats received an agent response.
-                </div>
+               
 
             </div>
         </div>

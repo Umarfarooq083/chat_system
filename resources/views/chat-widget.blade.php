@@ -20,6 +20,11 @@
         .input { flex: 1; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 12px; font-size: 13px; outline: none; }
         .send { border: 0; border-radius: 10px; padding: 10px 14px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
         .send:disabled { opacity: .6; cursor: not-allowed; }
+        .new-chat { background: #16a34a; }
+        .btn { border: 0; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .btn-sm { padding: 4px 8px; font-size: 12px; }
+        .btn-success { background: #16a34a; color: #fff; }
+        .btn-success:hover { background: #15803d; }
         .attach-btn { border: 1px solid #d1d5db; border-radius: 20px; padding: 7px 13px 7px 14px; background: #fff; cursor: pointer; font-size: 14px; }
         .hint { padding: 10px 12px; color: #6b7280; font-size: 12px; }
         .prechat-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #ecfeff; }
@@ -35,6 +40,22 @@
         .attachment { display: flex; align-items: center; gap: 8px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; margin: 8px; margin-bottom: 0; }
         .attachment img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
         .attachment .remove { cursor: pointer; color: #ef4444; font-weight: bold; }
+        .chat-closed-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            padding-left: 77px;
+            margin-top: 53px;
+        }
     </style>
 
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
@@ -48,6 +69,17 @@
         <button class="btn" id="closeBtn" type="button">-</button>
     </div>
     <div class="body" id="messages"></div>
+    <div class="chat-closed-overlay" id="chatClosedOverlay" style="display: none;">
+        <div class="text-center">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400" style="color: #94a3b8;">
+                <path d="M18 6 6 18" />
+                <path d="M6 6l12 12" />
+            </svg>
+            <div style="font-weight: 600; color: #475569; font-size: 14px; margin-bottom: 4px;">Chat Closed</div>
+            <div style="color: #64748b; font-size: 12px; margin-bottom: 12px;">No further messages can be sent.</div>
+            <button class="btn btn-success btn-sm new-chat" id="newChatBtnOverlay" type="button" style="margin-top: 16px;">New Chat</button>
+        </div>
+    </div>
     <div class="prechat-form" id="prechatForm">
         <div class="hint" style="color: #0e7490; font-weight: 600;">To start chat, please provide:</div>
         <div class="form-row">
@@ -65,15 +97,16 @@
             <input class="form-input" id="customerName" type="text" placeholder="Customer Name" required>
         </div>
         <div class="form-row">
+        <input class="form-input" id="email" type="email" placeholder="Email">
             <div id="registrationNoList" style="display: grid; gap: 8px;">
                 <div class="reg-row" style="display: flex; gap: 8px; align-items: center;">
                     <input class="form-input reg-input" type="text" placeholder="Registration No" required>
-                    <button class="form-btn secondary" id="addRegistrationNo" type="button" style="white-space: nowrap;">+ Add</button>
+                    <button class="form-btn secondary" id="addRegistrationNo" type="button" style="white-space: nowrap; background: green;">+</button>
                 </div>
             </div>
-            <input class="form-input" id="email" type="email" placeholder="Email">
+            
         </div>
-        <div class="form-row" style="justify-content: flex-end; gap: 8px;">
+        <div class="row" style="justify-content: flex-end; gap: 8px; padding-top:10px">
             <button class="form-btn secondary" id="cancelInfo" type="button">Cancel</button>
             <button class="form-btn primary" id="submitInfo" type="button">Submit</button>
         </div>
@@ -83,6 +116,7 @@
         <input class="input" id="text" placeholder="Type a message…" autocomplete="off">
         <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
         <button class="send" id="sendBtn" type="button" disabled>Send</button>
+        <button class="btn btn-success btn-sm mt-2 new-chat" id="newChatBtn" type="button" style="display: none;">New Chat</button>
     </div>
 </div>
 
@@ -99,6 +133,7 @@
     const sendBtn = document.getElementById('sendBtn');
     const attachBtn = document.getElementById('attachBtn');
     const fileInput = document.getElementById('fileInput');
+    const newChatBtn = document.getElementById('newChatBtn');
     const prechatFormEl = document.getElementById('prechatForm');
     const prechatNameEl = document.getElementById('prechatName');
     const prechatPhoneEl = document.getElementById('prechatPhone');
@@ -118,13 +153,15 @@
     }
 
     const storageKey = 'chat_widget_vid';
-    let visitorId = (typeof initialVisitorId === 'string' && initialVisitorId.trim() !== '') ? initialVisitorId.trim() : (localStorage.getItem(storageKey) || '');
+    const storedVisitorId = localStorage.getItem(storageKey) || '';
+    let visitorId = storedVisitorId.toString().trim();
+    if (!visitorId) {
+        visitorId = (typeof initialVisitorId === 'string' && initialVisitorId.trim() !== '') ? initialVisitorId.trim() : '';
+    }
     if (!visitorId) {
         visitorId = uuid();
-        localStorage.setItem(storageKey, visitorId);
-    } else {
-        localStorage.setItem(storageKey, visitorId);
     }
+    localStorage.setItem(storageKey, visitorId);
 
     let chatId = null;
     let lastId = 0;
@@ -138,6 +175,7 @@
     let urlTrackingSetup = false;
     let agentLastReadAt = null;
     let visitorLastReadAt = null;
+    let chatClosed = false;
 
     function getRegistrationNumbers() {
         if (!registrationNoListEl) return [];
@@ -164,8 +202,11 @@
         const removeBtn = document.createElement('button');
         removeBtn.className = 'form-btn secondary';
         removeBtn.type = 'button';
-        removeBtn.textContent = 'Remove';
+        removeBtn.textContent = '-';
         removeBtn.style.whiteSpace = 'nowrap';
+        removeBtn.style.backgroundColor = 'red';
+        removeBtn.style.width = '31px';
+        removeBtn.style.fontSize = '15px';
         removeBtn.addEventListener('click', () => row.remove());
 
         row.appendChild(input);
@@ -194,7 +235,7 @@
         addBtn.className = 'form-btn secondary';
         addBtn.id = 'addRegistrationNo';
         addBtn.type = 'button';
-        addBtn.textContent = '+ Add';
+        addBtn.textContent = '+';
         addBtn.style.whiteSpace = 'nowrap';
         addBtn.addEventListener('click', addRegistrationInput);
 
@@ -306,6 +347,10 @@
     }
 
     function updateFormVisibility() {
+        if (chatClosed) {
+            showPrechatForm = false;
+            showUserForm = false;
+        }
         if (showPrechatForm) {
             prechatFormEl.classList.add('show');
         } else {
@@ -317,7 +362,7 @@
             infoFormEl.classList.remove('show');
         }
 
-        const blockComposer = showPrechatForm === true;
+        const blockComposer = showPrechatForm === true || chatClosed === true;
         textEl.disabled = blockComposer;
         attachBtn.disabled = blockComposer;
         fileInput.disabled = blockComposer;
@@ -327,6 +372,62 @@
             removeAttachment();
         }
         updateSendButton();
+    }
+
+     function setChatClosed(isClosed) {
+         chatClosed = isClosed === true;
+
+         const overlay = document.getElementById('chatClosedOverlay');
+         if (overlay) {
+             overlay.style.display = chatClosed ? 'flex' : 'none';
+         }
+
+         newChatBtn.style.display = chatClosed ? 'inline-flex' : 'none';
+         sendBtn.style.display = chatClosed ? 'none' : 'inline-flex';
+         textEl.style.display = chatClosed ? 'none' : 'block';
+         attachBtn.style.display = chatClosed ? 'none' : 'inline-flex';
+
+         if (chatClosed) {
+             removeAttachment();
+         }
+
+         updateFormVisibility();
+     }
+
+    function applyChatPayload(data) {
+        chatId = data.chat.id;
+        agentLastReadAt = data.chat?.agent_last_read_at || null;
+        visitorLastReadAt = data.chat?.visitor_last_read_at || null;
+
+        messagesEl.innerHTML = '';
+        renderedMessageIds.clear();
+        lastId = 0;
+
+        showPrechatForm = !!data.chat?.prechat_required;
+        showUserForm = false;
+
+        (data.messages || []).forEach(m => {
+            renderMessage(m);
+            lastId = Math.max(lastId, Number(m.id || 0));
+            if (m.message_type === 'user_info_request') {
+                showUserForm = true;
+            }
+            if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
+                showUserForm = false;
+            }
+            if (m.message_type === 'prechat_info_request') {
+                showPrechatForm = true;
+            }
+            if (m.message_type === 'prechat_info_response' && m.sender_type === 'visitor') {
+                showPrechatForm = false;
+            }
+        });
+
+        setChatClosed((data.chat?.status || '') === 'close');
+        scrollToBottom();
+
+        initPusher();
+        subscribeToChatChannel(chatId);
     }
 
     function scrollToBottom() {
@@ -425,41 +526,48 @@
             }
             const data = await response.json();
 
-            chatId = data.chat.id;
-            agentLastReadAt = data.chat?.agent_last_read_at || null;
-            visitorLastReadAt = data.chat?.visitor_last_read_at || null;
-            messagesEl.innerHTML = '';
-            renderedMessageIds.clear(); // Clear previous message IDs
-            showPrechatForm = !!data.chat?.prechat_required;
-            (data.messages || []).forEach(m => {
-                renderMessage(m);
-                lastId = Math.max(lastId, Number(m.id || 0));
-                if (m.message_type === 'user_info_request') {
-                    showUserForm = true;
-                }
-                if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
-                    showUserForm = false;
-                }
-                if (m.message_type === 'prechat_info_request') {
-                    showPrechatForm = true;
-                }
-                if (m.message_type === 'prechat_info_response' && m.sender_type === 'visitor') {
-                    showPrechatForm = false;
-                }
-            });
-            updateFormVisibility();
-            scrollToBottom();
+            applyChatPayload(data);
             
             // initial ping to mark online
             await pingChat(true);
             await markVisitorRead();
             setupUrlTracking();
-
-            // Initialize Pusher and subscribe to chat channel
-            initPusher();
-            subscribeToChatChannel(chatId);
         } catch (error) {
             messagesEl.innerHTML = `<div class="hint">Failed to connect. Please refresh.<br>${String(error.message || error)}</div>`;
+        }
+    }
+
+    async function startNewChat() {
+        newChatBtn.disabled = true;
+        try {
+            const previousVisitorId = visitorId;
+            const nextVisitorId = uuid();
+
+            const response = await fetch(`${apiBase}/chat/new`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    visitor_id: nextVisitorId,
+                    previous_visitor_id: previousVisitorId,
+                    company_id: companyId,
+                    current_url: document.referrer || null,
+                    referrer_url: document.referrer || null,
+                }),
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                throw new Error(text || `Request failed (${response.status})`);
+            }
+            const data = await response.json();
+            visitorId = nextVisitorId;
+            localStorage.setItem(storageKey, visitorId);
+            applyChatPayload(data);
+            await pingChat(true);
+            await markVisitorRead();
+        } catch (e) {
+            alert('Failed to start a new chat. Please try again.');
+        } finally {
+            newChatBtn.disabled = false;
         }
     }
 
@@ -475,7 +583,6 @@
         if (!hasText && !hasFile) return;
         sendBtn.disabled = true;
         try {
-        console.log(document, 'umarfarooq');
             const formData = new FormData();
             formData.append('visitor_id', visitorId);
             formData.append('chat_id', chatId);
@@ -490,7 +597,26 @@
                 body: formData,
             });
             if (!response.ok) {
-                throw new Error(`Request failed (${response.status}): ${response.statusText}`);
+                let serverMessage = '';
+                try {
+                    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+                    if (contentType.includes('application/json')) {
+                        const json = await response.json();
+                        serverMessage = (json && json.message) ? String(json.message) : '';
+                    } else {
+                        serverMessage = String(await response.text());
+                    }
+                } catch (e) {
+                    serverMessage = '';
+                }
+
+                if (response.status === 403 && /closed/i.test(serverMessage || '')) {
+                    setChatClosed(true);
+                    alert('This chat has been closed. Click “New Chat” to start again.');
+                    return;
+                }
+
+                throw new Error(serverMessage || `Request failed (${response.status}): ${response.statusText}`);
             }
             const data = await response.json();
 
@@ -502,6 +628,8 @@
                 lastId = Math.max(lastId, Number(data.message.id || 0));
                 scrollToBottom();
             }
+        } catch (e) {
+            alert(String(e.message || 'Failed to send. Please try again.'));
         } finally {
             sendBtn.disabled = false;
             textEl.focus();
@@ -675,7 +803,7 @@
     }
 
     function updateSendButton() {
-        if (showPrechatForm) {
+        if (showPrechatForm || chatClosed) {
             sendBtn.disabled = true;
             return;
         }
@@ -720,8 +848,8 @@
         div.appendChild(span);
         
         const removeBtn = document.createElement('span');
-        removeBtn.className = 'remove';
-        removeBtn.textContent = '×';
+        removeBtn.className = '-';
+        removeBtn.textContent = '-';
         removeBtn.onclick = removeAttachment;
         div.appendChild(removeBtn);
         
@@ -749,8 +877,11 @@
         e.target.value = '';
     });
 
-    sendBtn.addEventListener('click', send);
-    prechatSubmitBtn.addEventListener('click', submitPrechat);
+     sendBtn.addEventListener('click', send);
+     newChatBtn.addEventListener('click', startNewChat);
+     const newChatBtnOverlay = document.getElementById('newChatBtnOverlay');
+     if (newChatBtnOverlay) newChatBtnOverlay.addEventListener('click', startNewChat);
+     prechatSubmitBtn.addEventListener('click', submitPrechat);
     submitInfoBtn.addEventListener('click', submitInfo);
     cancelInfoBtn.addEventListener('click', cancelInfo);
     if (addRegistrationNoBtn) addRegistrationNoBtn.addEventListener('click', addRegistrationInput);

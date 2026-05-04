@@ -1269,11 +1269,11 @@ const filteredUnassignChatsByCompany = computed(() => {
                 {{ feedbackError }}
               </div>
 
-              <form @submit.prevent="submitFeedback" class="row align-items-center">
+              <form @submit.prevent="submitFeedback" class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
 
-                <div class="col-md-4" v-for="inquiryList in inquiries" :key="inquiryList.id">
+                <div class="md:col-span-4" v-for="inquiryList in inquiries" :key="inquiryList.id">
                   <select 
-                    class="col-md-2 form-control" 
+                    class="w-full min-h-28 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30" 
                     multiple
                     v-model="selectedInquiries[inquiryList.id]"
                   >
@@ -1288,8 +1288,8 @@ const filteredUnassignChatsByCompany = computed(() => {
                   </select>
                 </div>
 
-                <div class="col-md-4 mt-4">
-                    <select v-model="feedbackForm.registration_no" class="col-md-2 form-control">
+                <div class="md:col-span-4">
+                    <select v-model="feedbackForm.registration_no" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
                     <option disabled value="">Registration No</option>
                     <option value="">Unknown</option>
                     <option v-for="message in filteredRegistrationNo" :value="getUserInfo(message).registration_no" >
@@ -1298,13 +1298,13 @@ const filteredUnassignChatsByCompany = computed(() => {
                   </select>
                 </div>
                 
-                <div class="col-md-2 mt-4">
+                <div class="md:col-span-4 flex items-center justify-end gap-2">
                     <button type="submit" :disabled="feedbackSaving"
-                      class="btn btn-primary h-10 mr-2">
+                      class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:ring-offset-2">
                       {{ feedbackSaving ? 'Saving...' : 'Save' }}
                     </button>
                     <button type="button" @click="closeFeedbackPanel"
-                      class="btn btn-secondary h-10">
+                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:ring-offset-2">
                       Cancel
                     </button>
                 </div>
@@ -1419,8 +1419,14 @@ const filteredUnassignChatsByCompany = computed(() => {
                       @click="window.open(attachmentViewUrl(msg), '_blank')" />
                     
                     <div v-if="msg.attachment_is_image" class="mt-1 text-right">
-                      <a :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener">
-                      <i class="fa fa-download" aria-hidden="true"></i>
+                      <a :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener"
+                        class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline">
+                      <svg viewBox="0 0 24 24" fill="none" class="h-4 w-4" aria-hidden="true">
+                        <path d="M12 3v10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        <path d="M8 11l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      </svg>
+                      Download
                       </a>
                     </div>
 
