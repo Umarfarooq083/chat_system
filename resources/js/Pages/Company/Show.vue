@@ -11,8 +11,8 @@ const copied = ref(false)
 
 const embedCode = `
 <script
-    src="https://92.204.187.99:8000/chat-widget/embed.js"
-    data-chat-url="https://92.204.187.99:8000"
+    src="https://chat.blueworldcity.com:8443/chat-widget/embed.js"
+    data-chat-url="https://chat.blueworldcity.com:8443"
     data-position="right"
     data-title="Chat with us"
     data-color="#111827"
