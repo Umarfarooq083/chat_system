@@ -57,6 +57,9 @@
   btn.style.background = 'rgb(17 101 226)';
   btn.style.color = '#fff';
   btn.style.fontWeight = '700';
+  btn.style.display = 'inline-flex';
+  btn.style.justifyContent = 'center';
+  btn.style.alignItems = 'center';
   btn.style.boxShadow = '0 10px 25px rgba(0,0,0,.18)';
 
   const panel = document.createElement('div');
