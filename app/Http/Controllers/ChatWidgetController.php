@@ -400,6 +400,9 @@ class ChatWidgetController extends Controller
                     $chat->last_message_at = $last->created_at;
                     $chat->last_activity = now();
                     $chat->visitor_last_read_at = now();
+                    if ($chat->first_visitor_message_at === null) {
+                        $chat->first_visitor_message_at = $last->created_at;
+                    }
                     if (! $chat->ip) {
                         $chat->ip = $request->ip();
                     }
@@ -449,6 +452,9 @@ class ChatWidgetController extends Controller
         $chat->last_message_at = $message->created_at;
         $chat->last_activity = now();
         $chat->visitor_last_read_at = now();
+        if ($chat->first_visitor_message_at === null) {
+            $chat->first_visitor_message_at = $message->created_at;
+        }
         if (! $chat->ip) {
             $chat->ip = $request->ip();
         }
