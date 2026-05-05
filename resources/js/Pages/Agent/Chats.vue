@@ -1603,9 +1603,19 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
 
               <!-- Text input -->
-              <input v-model="replyMessage" type="text" placeholder="Type your reply…"
+              <!-- <input v-model="replyMessage" type="text" placeholder="Type your reply…"
                 :disabled="selectedChat?.status === 'close'"
-                :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']" />
+                :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']" /> -->
+
+                  <textarea
+                      v-model="replyMessage"
+                      rows="1"
+                      placeholder="Type your reply…"
+                      ref="replyTextarea"
+                      @input="autoResizeReply"
+                      :disabled="selectedChat?.status === 'close'"
+                      :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400 resize-none overflow-hidden', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']">
+                    </textarea>
 
               <!-- Send button -->
               <button type="submit"
