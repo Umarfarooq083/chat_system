@@ -67,9 +67,10 @@ const feedbackForm = ref({
 })
 const feedbackError = ref('')
 const selectedInquiries = ref({});
-const attachedFiles = ref([])
-const fileInputRef = ref(null)
-const isDraggingOver = ref(false)
+    const attachedFiles = ref([])
+    const fileInputRef = ref(null)
+    const isDraggingOver = ref(false)
+    const pasteListenerActive = ref(false)
 
 const isPrechatPending = computed(() => {
   const chat = selectedChat.value
@@ -158,21 +159,27 @@ const updateOnlineFlags = () => {
   });
 };
 
-onMounted(() => {
-  chats.value = props.chats || []
-  updateOnlineFlags()
-  onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
-  slaNowIntervalId = setInterval(() => {
-    slaNowMs.value = Date.now()
-  }, 1000)
-  setupAudioUnlock()
-})
+    onMounted(() => {
+      chats.value = props.chats || []
+      updateOnlineFlags()
+      onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
+      slaNowIntervalId = setInterval(() => {
+        slaNowMs.value = Date.now()
+      }, 1000)
+      setupAudioUnlock()
+      // Add paste event listener for clipboard image paste
+      document.addEventListener('paste', handlePaste)
+      pasteListenerActive.value = true
+    })
 
-onBeforeUnmount(() => {
-  if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
-  if (pollIntervalId) clearInterval(pollIntervalId)
-  if (slaNowIntervalId) clearInterval(slaNowIntervalId)
-})
+    onBeforeUnmount(() => {
+      if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
+      if (pollIntervalId) clearInterval(pollIntervalId)
+      if (slaNowIntervalId) clearInterval(slaNowIntervalId)
+      if (pasteListenerActive.value) {
+        document.removeEventListener('paste', handlePaste)
+      }
+    })
 
 watch(() => props.chats, (newChats) => {
   if (newChats) {
@@ -411,15 +418,44 @@ const canSendHtmlForMessage = (chat, msg) => {
   return !!msgReg && !!chatReg && msgReg === chatReg && chat?.external_api_status === 'success' && !!chat?.external_api_response
 }
 
-const triggerFileInput = () => {
-  fileInputRef.value?.click()
-}
+    const triggerFileInput = () => {
+      fileInputRef.value?.click()
+    }
 
-const onFileInputChange = (event) => {
-  addFiles(Array.from(event.target.files || []))
-  // reset so the same file can be re-selected
-  event.target.value = ''
-}
+    const handlePaste = async (e) => {
+      // Only handle paste when a chat is selected and the reply textarea is focused
+      if (!selectedChat.value || selectedChat.value?.status === 'close') return
+
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (const item of items) {
+        // Check if the pasted item is an image
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const file = item.getAsFile()
+          if (!file) return
+
+          if (file.size > MAX_ATTACHMENT_BYTES) {
+            sendError.value = 'File too large. Maximum size is 20 MB.'
+            return
+          }
+
+          // Clear existing attachments (single file mode)
+          attachedFiles.value = []
+          const isImage = file.type.startsWith('image/')
+          const preview = isImage ? URL.createObjectURL(file) : null
+          attachedFiles.value.push({ file, preview, isImage })
+          break
+        }
+      }
+    }
+
+    const onFileInputChange = (event) => {
+      addFiles(Array.from(event.target.files || []))
+      // reset so the same file can be re-selected
+      event.target.value = ''
+    }
 
 const addFiles = (newFiles) => {
   // only take the first file — one at a time
@@ -1551,6 +1587,9 @@ const filteredUnassignChatsByCompany = computed(() => {
               </svg>
               Drop files to attach
             </div>
+            <div v-if="!isDraggingOver" class="flex items-center justify-center gap-1 px-4 py-1 text-[10px] text-slate-400">
+              <span>or paste image (Ctrl+V)</span>
+            </div>
 
             <div v-if="sendError" class="px-4 pb-2">
               <div
@@ -1586,21 +1625,21 @@ const filteredUnassignChatsByCompany = computed(() => {
                 Waiting for visitor name &amp; phone.
               </div> -->
 
-              <!-- Attach button -->
-              <button type="button" @click="triggerFileInput" title="Attach files or Drag and drop here"
-                class="flex-shrink-0 flex items-center justify-center w-9 h-9 mr-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors border border-slate-200 hover:border-indigo-200"
-                :disabled="selectedChat?.status === 'close'"
-                :class="[attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <path
-                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                </svg>
-                <!-- Badge count -->
-                <span v-if="attachedFiles.length"
-                  class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center leading-none"
-                  style="font-size: 9px;">{{ attachedFiles.length }}</span>
-              </button>
+               <!-- Attach button -->
+               <button type="button" @click="triggerFileInput" title="Attach files or Drag and drop here (or paste: Ctrl+V)"
+                 class="flex-shrink-0 flex items-center justify-center w-9 h-9 mr-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors border border-slate-200 hover:border-indigo-200"
+                 :disabled="selectedChat?.status === 'close'"
+                 :class="[attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']">
+                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                   <path
+                     d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                 </svg>
+                 <!-- Badge count -->
+                 <span v-if="attachedFiles.length"
+                   class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center leading-none"
+                   style="font-size: 9px;">{{ attachedFiles.length }}</span>
+               </button>
 
               <!-- Text input -->
               <!-- <input v-model="replyMessage" type="text" placeholder="Type your reply…"
