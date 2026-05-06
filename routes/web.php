@@ -47,6 +47,9 @@ Route::get('/chat-widget', [ChatWidgetController::class, 'page'])->name('chat-wi
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats', [AgentController::class, 'index'])->name('agent.chats');
+    Route::get('/agent/chats/history', [AgentController::class, 'history'])->name('agent.chats.history');
+    Route::get('/agent/chats/history/{chat}', [AgentController::class, 'historyShow'])->name('agent.chats.history.show');
+    Route::get('/agent/chats/history/{chat}/messages', [AgentController::class, 'historyMessages'])->name('agent.chats.history.messages');
     Route::get('/agent/reports', [AgentController::class, 'reports'])->name('agent.reports');
     Route::get('/agent/sla-report', [AgentController::class, 'slaReport'])->name('agent.sla-report');
     Route::get('/agent/reports/export', [AgentController::class, 'exportReports'])->name('agent.reports.export');

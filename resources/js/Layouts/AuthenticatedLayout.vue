@@ -45,6 +45,12 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Chat System
                                 </NavLink>
+                                <NavLink
+                                    :href="route('agent.chats.history')"
+                                    :active="route().current('agent.chats.history') || route().current('agent.chats.history.show')"
+                                >
+                                    Chat History
+                                </NavLink>
                                  <NavLink
                                      :href="route('agent.reports')"
                                      :active="route().current('agent.reports')"
@@ -181,6 +187,12 @@ const showingNavigationDropdown = ref(false);
                             :active="route().current('agent.chats')"
                         >
                             Chat System
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink
+                            :href="route('agent.chats.history')"
+                            :active="route().current('agent.chats.history') || route().current('agent.chats.history.show')"
+                        >
+                            Chat History
                         </ResponsiveNavLink>
                          <ResponsiveNavLink
                              :href="route('agent.reports')"

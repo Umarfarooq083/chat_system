@@ -21,6 +21,21 @@ use Illuminate\Support\Collection;
 
 class AgentController extends Controller
 {
+    private function allowedCompanyUuids(): Collection
+    {
+        $companyIds = DB::table('company_user')
+            ->where('user_id', auth()->id())
+            ->pluck('company_id');
+
+        if ($companyIds->isEmpty()) {
+            return collect();
+        }
+
+        return Company::query()
+            ->whereIn('id', $companyIds)
+            ->pluck('uuid');
+    }
+
     private function assertCanActOnChat(Chat $chat): void
     {
         if ($chat->assigned_agent_id && $chat->assigned_agent_id !== auth()->id()) {
@@ -80,11 +95,7 @@ class AgentController extends Controller
 
     public function index()
     {
-        $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
-        $CompanyUUID = [];
-        if ($companyIds) {
-            $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
-        }
+        $CompanyUUID = $this->allowedCompanyUuids();
 
         $chats = Chat::query()
             ->with('agent')
@@ -126,6 +137,163 @@ class AgentController extends Controller
         ]);
     }
 
+    public function history(Request $request)
+    {
+        $CompanyUUID = $this->allowedCompanyUuids();
+
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:200'],
+            'status' => ['nullable', 'in:open,close'],
+            'company_id' => ['nullable', 'string', 'max:64'],
+            'assigned' => ['nullable', 'in:any,me,assigned,unassigned'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
+            'per_page' => ['nullable', 'integer', 'min:10', 'max:200'],
+        ]);
+
+        $perPage = $validated['per_page'] ?? 25;
+
+        $companies = Company::query()
+            ->whereIn('uuid', $CompanyUUID->toArray())
+            ->select('uuid', 'name')
+            ->orderBy('name')
+            ->get();
+
+        $chats = Chat::query()
+            ->with([
+                'agent:id,name',
+                'latestMessage' => function ($query) {
+                    $query->select(
+                        'messages.id',
+                        'messages.chat_id',
+                        'messages.sender_type',
+                        'messages.message',
+                        'messages.message_type',
+                        'messages.created_at'
+                    );
+                },
+            ])
+            ->whereIn('company_id', $CompanyUUID->toArray())
+            ->when(! empty($validated['company_id'] ?? null), function ($q) use ($validated, $CompanyUUID) {
+                $companyId = (string) $validated['company_id'];
+                if (! $CompanyUUID->contains($companyId)) {
+                    abort(403);
+                }
+                $q->where('company_id', $companyId);
+            })
+            ->when(! empty($validated['status'] ?? null), fn ($q) => $q->where('status', $validated['status']))
+            ->when(! empty($validated['assigned'] ?? null) && $validated['assigned'] !== 'any', function ($q) use ($validated) {
+                if ($validated['assigned'] === 'me') {
+                    $q->where('assigned_agent_id', auth()->id());
+                } elseif ($validated['assigned'] === 'assigned') {
+                    $q->whereNotNull('assigned_agent_id');
+                } elseif ($validated['assigned'] === 'unassigned') {
+                    $q->whereNull('assigned_agent_id');
+                }
+            })
+            ->when(! empty($validated['from'] ?? null), fn ($q) => $q->whereDate('last_message_at', '>=', $validated['from']))
+            ->when(! empty($validated['to'] ?? null), fn ($q) => $q->whereDate('last_message_at', '<=', $validated['to']))
+            ->when(! empty($validated['search'] ?? null), function ($q) use ($validated) {
+                $term = trim((string) $validated['search']);
+                if ($term === '') {
+                    return;
+                }
+
+                $q->where(function ($q2) use ($term) {
+                    $q2
+                        ->where('phone', 'like', "%{$term}%")
+                        ->orWhere('customer_name', 'like', "%{$term}%")
+                        ->orWhere('registration_no', 'like', "%{$term}%")
+                        ->orWhere('email', 'like', "%{$term}%")
+                        ->orWhere('website', 'like', "%{$term}%");
+                });
+            })
+            ->orderByDesc('last_message_at')
+            ->orderByDesc('id')
+            ->paginate($perPage)
+            ->withQueryString();
+
+        return Inertia::render('Agent/ChatHistory', [
+            'chats' => $chats,
+            'filters' => [
+                'search' => $validated['search'] ?? '',
+                'status' => $validated['status'] ?? '',
+                'company_id' => $validated['company_id'] ?? '',
+                'assigned' => $validated['assigned'] ?? 'any',
+                'from' => $validated['from'] ?? '',
+                'to' => $validated['to'] ?? '',
+                'per_page' => $perPage,
+            ],
+            'companies' => $companies,
+        ]);
+    }
+
+    public function historyShow(Request $request, Chat $chat)
+    {
+        $CompanyUUID = $this->allowedCompanyUuids();
+        if (! $CompanyUUID->contains((string) $chat->company_id)) {
+            abort(403);
+        }
+
+        $chat->load([
+            'agent:id,name',
+            'companyRel:uuid,name',
+        ]);
+
+        $messages = $chat
+            ->messages()
+            ->orderBy('created_at')
+            ->paginate(100)
+            ->withQueryString();
+
+        return Inertia::render('Agent/ChatHistoryDetail', [
+            'chat' => $chat,
+            'messages' => $messages,
+        ]);
+    }
+
+    public function historyMessages(Request $request, Chat $chat)
+    {
+        $CompanyUUID = $this->allowedCompanyUuids();
+        if (! $CompanyUUID->contains((string) $chat->company_id)) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'limit' => ['nullable', 'integer', 'min:10', 'max:300'],
+        ]);
+
+        $limit = $validated['limit'] ?? 200;
+
+        $chat->load([
+            'agent:id,name',
+            'companyRel:uuid,name',
+            'latestMessage' => function ($query) {
+                $query->select(
+                    'messages.id',
+                    'messages.chat_id',
+                    'messages.sender_type',
+                    'messages.message',
+                    'messages.message_type',
+                    'messages.created_at'
+                );
+            },
+        ]);
+
+        $messages = $chat
+            ->messages()
+            ->orderByDesc('created_at')
+            ->limit($limit)
+            ->get()
+            ->reverse()
+            ->values();
+
+        return response()->json([
+            'chat' => $chat,
+            'messages' => $messages,
+        ]);
+    }
+
     public function poll(Request $request)
     {
         $validated = $request->validate([
@@ -144,11 +312,7 @@ class AgentController extends Controller
         // if the client doesn't provide a cursor, default to a short lookback window
         $since ??= now()->subMinutes(2);
 
-        $companyIds = DB::table('company_user')->where('user_id', auth()->user()->id)->pluck('company_id');
-        $CompanyUUID = [];
-        if ($companyIds) {
-            $CompanyUUID = Company::whereIn('id', $companyIds)->pluck('uuid');
-        }
+        $CompanyUUID = $this->allowedCompanyUuids();
 
         $chats = Chat::query()
             ->where('updated_at', '>', $since)
