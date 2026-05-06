@@ -57,6 +57,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agent/chats/{chat}/feedbacks', [AgentController::class, 'storeFeedback'])->name('agent.chat.feedbacks.store');
     Route::post('/agent/chats/{chat}/read', [AgentController::class, 'markRead'])->name('agent.chat.read');
     Route::post('/agent/chats/{chat}/close', [AgentController::class, 'close'])->name('agent.chat.close');
+    Route::post('/agent/chats/{chat}/transfer', [AgentController::class, 'transfer'])->name('agent.chat.transfer');
     Route::post('/agent/cnic/lookup', [AgentController::class, 'cnicLookup'])->name('agent.cnic.lookup');
     Route::post('/agent/chats/{chat}/external/fetch', [AgentController::class, 'fetchExternalData'])->name('agent.chat.external.fetch');
     Route::post('/agent/chats/{chat}/external/send-html', [AgentController::class, 'sendExternalHtml'])->name('agent.chat.external.sendHtml');
