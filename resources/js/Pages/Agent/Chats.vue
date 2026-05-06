@@ -29,10 +29,6 @@ const props = defineProps({
     type: String,
     default: null
   },
-  users: {
-    type: Array,
-    default: () => []
-  }
 })
 
 const chats = ref([])
@@ -100,11 +96,37 @@ const showTransferModal = ref(false)
 const transferLoading = ref(false)
 const selectedTransferChat = ref(null)
 const selectedTransferUser = ref(null)
+const transferUsers = ref([])
+const transferUsersLoading = ref(false)
+const transferUsersError = ref('')
 
 const openTransferModal = (chat) => {
   selectedTransferChat.value = chat
   selectedTransferUser.value = null
+  transferUsers.value = []
+  transferUsersError.value = ''
   showTransferModal.value = true
+
+  const companyId = chat?.company_id
+  if (!companyId) {
+    transferUsersError.value = 'Company ID missing for this chat.'
+    return
+  }
+
+  transferUsersLoading.value = true
+  axios
+    .get('/agent/transfer-users', { params: { company_id: companyId } })
+    .then((res) => {
+      transferUsers.value = res?.data?.users || []
+    })
+    .catch((e) => {
+      console.error('Failed to load transfer users:', e)
+      transferUsersError.value = extractErrorMessage(e, 'Failed to load users.')
+      transferUsers.value = []
+    })
+    .finally(() => {
+      transferUsersLoading.value = false
+    })
 }
 
 const closeTransferModal = () => {
@@ -112,11 +134,13 @@ const closeTransferModal = () => {
   selectedTransferChat.value = null
   selectedTransferUser.value = null
   transferLoading.value = false
+  transferUsersLoading.value = false
+  transferUsersError.value = ''
+  transferUsers.value = []
 }
 
 const transferChat = async () => {
   if (!selectedTransferChat.value || !selectedTransferUser.value) return
-  
   transferLoading.value = true
   try {
     const response = await axios.post(`/agent/chats/${selectedTransferChat.value.id}/transfer`, {
@@ -132,6 +156,7 @@ const transferChat = async () => {
     
     closeTransferModal()
   } catch (e) {
+    console.log(e)
     console.error('Transfer failed:', e)
   } finally {
     transferLoading.value = false
@@ -1903,12 +1928,16 @@ const filteredUnassignChatsByCompany = computed(() => {
           <select
             v-model="selectedTransferUser"
             class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            :disabled="transferUsersLoading || transferLoading"
           >
-            <option :value="null" disabled>Select a user...</option>
-            <option v-for="user in users" :key="user.id" :value="user">
+            <option :value="null" disabled>
+              {{ transferUsersLoading ? 'Loading users...' : 'Select a user...' }}
+            </option>
+            <option v-for="user in transferUsers" :key="user.id" :value="user">
               {{ user.name }} ({{ user.email }})
             </option>
           </select>
+          <p v-if="transferUsersError" class="mt-2 text-sm text-red-600">{{ transferUsersError }}</p>
         </div>
 
         <div class="flex justify-end gap-2">

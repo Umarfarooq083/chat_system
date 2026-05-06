@@ -118,21 +118,11 @@ class AgentController extends Controller
             ->get();
 
         $chats->each->append('is_online');
-
-        // $users = DB::table('users')
-        //     ->join('company_user', 'users.id', '=', 'company_user.user_id')
-        //     ->whereIn('company_user.company_id', $companyIds)
-        //     ->where('users.id', '!=', auth()->id())
-        //     ->select('users.id', 'users.name', 'users.email')
-        //     ->distinct()
-        //     ->get();
-        // dd($users->toArray());
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
             'auth_user' => auth()->user(),
             'loginUserCompniesList' => $CompanyUUID,
             'pollCursor' => now()->toIso8601String(),
-            // 'users' => $users,
         ]);
     }
 
@@ -451,6 +441,32 @@ class AgentController extends Controller
         return response()->json([
             'chat' => $chat,
             'message' => 'Chat transferred successfully.',
+        ]);
+    }
+
+    public function transferUsers(Request $request)
+    {
+        $validated = $request->validate([
+            'company_id' => ['required', 'string', 'exists:companies,uuid'],
+        ]);
+        $company = Company::query()
+        ->where('uuid', $validated['company_id'])
+        ->firstOrFail();
+        
+        $hasAccess = DB::table('company_user')
+        ->where('company_id', $company->id)
+        ->pluck('user_id');
+        
+        $users = DB::table('users')
+        ->where('users.id', '!=', auth()->id())
+        ->whereIn('users.id', $hasAccess)
+        ->select('users.id', 'users.name', 'users.email')
+        ->distinct()
+        ->orderBy('users.name')
+        ->get();
+      
+        return response()->json([
+            'users' => $users->toArray(),
         ]);
     }
 
