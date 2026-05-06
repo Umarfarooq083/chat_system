@@ -143,7 +143,7 @@ class AgentController extends Controller
 
         $validated = $request->validate([
             'search' => ['nullable', 'string', 'max:200'],
-            'status' => ['nullable', 'in:open,close'],
+            // 'status' => ['nullable', 'in:open,close'],
             'company_id' => ['nullable', 'string', 'max:64'],
             'assigned' => ['nullable', 'in:any,me,assigned,unassigned'],
             'from' => ['nullable', 'date'],
@@ -181,7 +181,7 @@ class AgentController extends Controller
                 }
                 $q->where('company_id', $companyId);
             })
-            ->when(! empty($validated['status'] ?? null), fn ($q) => $q->where('status', $validated['status']))
+            ->where('status', 'close') 
             ->when(! empty($validated['assigned'] ?? null) && $validated['assigned'] !== 'any', function ($q) use ($validated) {
                 if ($validated['assigned'] === 'me') {
                     $q->where('assigned_agent_id', auth()->id());
