@@ -770,9 +770,19 @@ const removeRegistration = (index) => {
             <i class="fa fa-paperclip"></i>
           </button>
 
-          <input v-model="message" type="text" placeholder="Type a message..."
+          <!-- <input v-model="message" type="text" placeholder="Type a message..."
             class="form-control rounded-5"
-            :disabled="showPrechatForm || chatClosed" />
+            :disabled="showPrechatForm || chatClosed" /> -->
+
+           <textarea v-model="message"
+              @input="autoResize"
+              ref="textareaRef"
+              placeholder="Type a message..."
+              class="form-control rounded-5"
+              rows="1"
+              style="overflow:hidden; resize:none;"
+              :disabled="showPrechatForm || chatClosed">
+          </textarea>
 
           <button type="submit"
             class="btn btn-primary btn-sm rounded-5 px-3"

@@ -118,7 +118,6 @@ class AgentController extends Controller
             ->get();
 
         $chats->each->append('is_online');
-
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
             'auth_user' => auth()->user(),
@@ -381,6 +380,93 @@ class AgentController extends Controller
 
         return response()->json([
             'chat' => $chat,
+        ]);
+    }
+
+    public function transfer(Request $request, Chat $chat)
+    {
+        $validated = $request->validate([
+            'agent_id' => ['required', 'exists:users,id'],
+        ]);
+
+        $targetAgentId = $validated['agent_id'];
+
+        // Don't allow transfer to self
+        if ($targetAgentId == auth()->id()) {
+            return response()->json([
+                'message' => 'You cannot transfer chat to yourself.',
+            ], 422);
+        }
+
+        // Check if the chat belongs to the current agent's company
+        $companyIds = DB::table('company_user')->where('user_id', auth()->id())->pluck('company_id');
+        $targetAgentCompanyIds = DB::table('company_user')->where('user_id', $targetAgentId)->pluck('company_id');
+
+        if ($companyIds->intersect($targetAgentCompanyIds)->isEmpty()) {
+            return response()->json([
+                'message' => 'Target agent is not in your company.',
+            ], 422);
+        }
+
+        $previousAgentId = $chat->assigned_agent_id;
+        $chat->assigned_agent_id = $targetAgentId;
+        $chat->save();
+
+        // Create a system message about the transfer
+        $transferMessage = Message::create([
+            'chat_id' => $chat->id,
+            'sender_type' => 'system',
+            'message' => 'Chat transferred from Agent ID ' . $previousAgentId . ' to Agent ID ' . $targetAgentId . ' by ' . auth()->user()->name,
+            'message_type' => 'system',
+        ]);
+
+        $chat->load([
+            'latestMessage' => function ($query) {
+                $query->select(
+                    'messages.id',
+                    'messages.chat_id',
+                    'messages.sender_type',
+                    'messages.message',
+                    'messages.message_type',
+                    'messages.created_at'
+                );
+            },
+            'agent',
+        ]);
+        $chat->append('is_online');
+
+        // Broadcast the transfer message
+        broadcast(new MessageSent($transferMessage));
+
+        return response()->json([
+            'chat' => $chat,
+            'message' => 'Chat transferred successfully.',
+        ]);
+    }
+
+    public function transferUsers(Request $request)
+    {
+        $validated = $request->validate([
+            'company_id' => ['required', 'string', 'exists:companies,uuid'],
+        ]);
+        $company = Company::query()
+        ->where('uuid', $validated['company_id'])
+        ->firstOrFail();
+        
+        $hasAccess = DB::table('company_user')
+        ->where('company_id', $company->id)
+        ->pluck('user_id');
+        
+        $users = DB::table('users')
+        ->where('users.id', '!=', auth()->id())
+        ->whereIn('users.id', $hasAccess)
+        ->select('users.id', 'users.name', 'users.email')
+        ->distinct()
+        ->orderBy('users.name')
+        ->get();
+      
+        return response()->json([
+            'users' => $users->toArray(),
         ]);
     }
 

@@ -28,7 +28,7 @@ const props = defineProps({
   pollCursor: {
     type: String,
     default: null
-  }
+  },
 })
 
 const chats = ref([])
@@ -70,6 +70,8 @@ const selectedInquiries = ref({});
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const isDraggingOver = ref(false)
+const pasteListenerActive = ref(false)
+const dismissedClosedChatId = ref(null)
 
 const isPrechatPending = computed(() => {
   const chat = selectedChat.value
@@ -90,7 +92,76 @@ const cnicSubmitting = ref(false)
 const cnicResult = ref(null)
 const cnicError = ref('')
 
-const dismissedClosedChatId = ref(null)
+const showTransferModal = ref(false)
+const transferLoading = ref(false)
+const selectedTransferChat = ref(null)
+const selectedTransferUser = ref(null)
+const transferUsers = ref([])
+const transferUsersLoading = ref(false)
+const transferUsersError = ref('')
+
+const openTransferModal = (chat) => {
+  selectedTransferChat.value = chat
+  selectedTransferUser.value = null
+  transferUsers.value = []
+  transferUsersError.value = ''
+  showTransferModal.value = true
+
+  const companyId = chat?.company_id
+  if (!companyId) {
+    transferUsersError.value = 'Company ID missing for this chat.'
+    return
+  }
+
+  transferUsersLoading.value = true
+  axios
+    .get('/agent/transfer-users', { params: { company_id: companyId } })
+    .then((res) => {
+      transferUsers.value = res?.data?.users || []
+    })
+    .catch((e) => {
+      console.error('Failed to load transfer users:', e)
+      transferUsersError.value = extractErrorMessage(e, 'Failed to load users.')
+      transferUsers.value = []
+    })
+    .finally(() => {
+      transferUsersLoading.value = false
+    })
+}
+
+const closeTransferModal = () => {
+  showTransferModal.value = false
+  selectedTransferChat.value = null
+  selectedTransferUser.value = null
+  transferLoading.value = false
+  transferUsersLoading.value = false
+  transferUsersError.value = ''
+  transferUsers.value = []
+}
+
+const transferChat = async () => {
+  if (!selectedTransferChat.value || !selectedTransferUser.value) return
+  transferLoading.value = true
+  try {
+    const response = await axios.post(`/agent/chats/${selectedTransferChat.value.id}/transfer`, {
+      agent_id: selectedTransferUser.value.id
+    })
+    
+    if (response.data?.chat) {
+      mergeChatIntoList(response.data.chat)
+      if (selectedChat.value?.id === selectedTransferChat.value.id) {
+        Object.assign(selectedChat.value, response.data.chat)
+      }
+    }
+    
+    closeTransferModal()
+  } catch (e) {
+    console.log(e)
+    console.error('Transfer failed:', e)
+  } finally {
+    transferLoading.value = false
+  }
+}
 
 const openCnicModal = () => {
   cnicModalOpen.value = true
@@ -128,9 +199,9 @@ const submitCnicLookup = async () => {
   cnicError.value = ''
   cnicResult.value = null
 
-  const digits = (cnicInput.value || '').toString().replace(/\\D+/g, '')
+  const digits = (cnicInput.value || '').toString().replace(/\D+/g, '')
   console.log(digits.length)
-  if (digits.length !== 15) {
+  if (digits.length !== 13) {
     cnicError.value = 'CNIC must be 13 digits (e.g. 11111-1111111-1).'
     return
   }
@@ -166,12 +237,17 @@ onMounted(() => {
     slaNowMs.value = Date.now()
   }, 1000)
   setupAudioUnlock()
+  document.addEventListener('paste', handlePaste)
+  pasteListenerActive.value = true
 })
 
 onBeforeUnmount(() => {
   if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
   if (pollIntervalId) clearInterval(pollIntervalId)
   if (slaNowIntervalId) clearInterval(slaNowIntervalId)
+  if (pasteListenerActive.value) {
+    document.removeEventListener('paste', handlePaste)
+  }
 })
 
 watch(() => props.chats, (newChats) => {
@@ -181,39 +257,10 @@ watch(() => props.chats, (newChats) => {
 }, { immediate: true, deep: true })
 
 watch(selectedChat, (newChat, oldChat) => {
-  // Reset dismissed overlay when switching to a different chat
   if (newChat?.id !== dismissedClosedChatId.value) {
     dismissedClosedChatId.value = null
   }
 })
-
-// const upsertChatFromPoll = (incoming) => {
-//   if (!incoming?.id) return
-
-//   const index = chats.value.findIndex(c => c.id === incoming.id)
-//   if (index === -1) {
-//     incoming.unread_count = incoming.unread_count || 0
-//     if (!incoming.messages) incoming.messages = []
-//     chats.value.unshift(incoming)
-//     updateOnlineFlags()
-//     subscribeToChat(incoming.id)
-//     return
-//   }
-
-//   const existing = chats.value[index]
-//   const existingMessages = existing?.messages ? [...existing.messages] : null
-//   Object.assign(existing, incoming)
-//   if (existingMessages && existingMessages.length) {
-//     existing.messages = existingMessages
-//   } else if (!existing.messages) {
-//     existing.messages = []
-//   }
-
-//   // keep list ordering fresh when activity happens
-//   moveChatToTop(existing.id)
-//   updateOnlineFlags()
-// }
-
 
 const selectChat = async (chat) => {
   selectedChat.value = chat
@@ -298,7 +345,6 @@ const submitFeedback = async () => {
       await fetchFeedbacks(chatId)
     }
 
-    // ✅ Reset properly
     inquiries.value.forEach(item => {
       selectedInquiries.value[item.id] = []
     })
@@ -379,7 +425,6 @@ const registrationNoForUserInfoMessage = (msg) => {
   return decoded.registration_no
 }
 
-
 const fetchExternalDataForMessage = async (chat, msg) => {
   if (!chat?.id) return
   const registrationNo = registrationNoForUserInfoMessage(msg)
@@ -399,7 +444,6 @@ const fetchExternalDataForMessage = async (chat, msg) => {
   }
 }
 
-
 const sendExternalHtmlForMessage = async (chat, msg) => {
   const registrationNo = registrationNoForUserInfoMessage(msg)
   return sendExternalHtml(chat, registrationNo)
@@ -415,21 +459,45 @@ const triggerFileInput = () => {
   fileInputRef.value?.click()
 }
 
+const handlePaste = async (e) => {
+  if (!selectedChat.value || selectedChat.value?.status === 'close') return
+
+  const items = e.clipboardData?.items
+  if (!items) return
+
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      const file = item.getAsFile()
+      if (!file) return
+
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        sendError.value = 'File too large. Maximum size is 20 MB.'
+        return
+      }
+
+      attachedFiles.value = []
+      const isImage = file.type.startsWith('image/')
+      const preview = isImage ? URL.createObjectURL(file) : null
+      attachedFiles.value.push({ file, preview, isImage })
+      break
+    }
+  }
+}
+
 const onFileInputChange = (event) => {
   addFiles(Array.from(event.target.files || []))
-  // reset so the same file can be re-selected
   event.target.value = ''
 }
 
 const addFiles = (newFiles) => {
-  // only take the first file — one at a time
   const file = newFiles[0]
   if (!file) return
   if (file.size > MAX_ATTACHMENT_BYTES) {
     sendError.value = 'File too large. Maximum size is 20 MB.'
     return
   }
-  attachedFiles.value = [] // replace any existing
+  attachedFiles.value = []
   const isImage = file.type.startsWith('image/')
   const preview = isImage ? URL.createObjectURL(file) : null
   attachedFiles.value.push({ file, preview, isImage })
@@ -502,7 +570,6 @@ const sendReply = async () => {
     }
     sendError.value = ''
   } catch (e) {
-    // restore on error
     sendError.value = extractErrorMessage(e, 'Failed to send. Please try again.')
     replyMessage.value = tempMessage
     attachedFiles.value = tempFiles
@@ -613,8 +680,6 @@ const addMessage = (chatId, message) => {
   if (!chat) return
   if (chat.latest_message?.id === message.id) return
 
-  // If visitor submits the info form again (possibly for a different registration),
-  // treat any previously fetched external data as stale until re-fetched.
   if (message?.message_type === 'user_info_response' && message?.sender_type === 'visitor') {
     resetExternalApiState(chatId)
   }
@@ -629,7 +694,6 @@ const addMessage = (chatId, message) => {
     chat.first_agent_reply_at = message.created_at
   }
   if (message.sender_type === 'visitor') {
-    // Beep for assigned agent when visitor sends a message
     if (chat?.assigned_agent_id === props.auth_user?.id) {
       beep()
     }
@@ -644,7 +708,6 @@ const addMessage = (chatId, message) => {
   if (selectedChat.value && selectedChat.value.id === chatId) {
     if (!messages.value.some(m => m.id === message.id)) {
       messages.value.push(message)
-      // keep only the latest 10 in the opened chat
       if (messages.value.length > 10) {
         messages.value.splice(0, messages.value.length - 10)
       }
@@ -668,22 +731,6 @@ onMounted(() => {
     .error((error) => console.error('Error subscribing to newChats channel:', error))
   chats.value.forEach(chat => subscribeToChat(chat.id))
 })
-
-// uncomment this code if you want to move clicked chat on top and commented by umar farooq
-// const pollForChats = async () => {
-//   try {
-//     const response = await axios.get('/agent/chats/poll', {
-//       params: { cursor: pollCursor.value }
-//     })
-//     pollCursor.value = response.data?.cursor || pollCursor.value
-//     const incomingChats = response.data?.chats || []
-//     if (Array.isArray(incomingChats) && incomingChats.length) {
-//       incomingChats.forEach(upsertChatFromPoll)
-//     }
-//   } catch (e) {
-//     // ignore transient errors; polling is only a safety net when realtime drops
-//   }
-// }
 
 onMounted(() => {
   // pollForChats()
@@ -747,8 +794,6 @@ const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
   const cfg = window.ChatConfig || {}
   const apiBase = (cfg.apiBase || '').toString().trim()
 
-  // For external widgets, `apiBase` is often like `https://your-domain.com/api`.
-  // Attachments live on the web host root, so we only use the URL origin, not the `/api` path.
   if (/^https?:\/\//i.test(apiBase)) {
     try {
       const origin = new URL(apiBase).origin
@@ -758,11 +803,12 @@ const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
     }
   }
 
-  // If apiBase is not absolute, we can't reliably resolve cross-domain attachments.
   return relativeOrAbsoluteUrl
 }
+
 const attachmentViewUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_view_url))
 const attachmentDownloadUrl = (msg) => (resolveAttachmentUrl(msg?.attachment_download_url || msg?.attachment_view_url))
+
 const formatMessageTime = (timestamp) => {
   if (!timestamp) return ''
   try {
@@ -833,8 +879,6 @@ const filteredUnassignChatsByCompany = computed(() => {
     props.loginUserCompniesList.includes(chat.company_id)
   )
 })
-
-
 </script>
 
 <template>
@@ -857,7 +901,6 @@ const filteredUnassignChatsByCompany = computed(() => {
           >
             CNIC Lookup
           </button>
-
           <div
             class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 uppercase tracking-widest">
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -867,6 +910,7 @@ const filteredUnassignChatsByCompany = computed(() => {
       </div>
     </template>
 
+    <!-- CNIC Modal -->
     <Modal :show="cnicModalOpen" @close="closeCnicModal">
       <div class="p-6">
         <h2 class="text-lg font-medium text-gray-900">CNIC Lookup</h2>
@@ -888,7 +932,7 @@ const filteredUnassignChatsByCompany = computed(() => {
           <table class="w-full text-left text-sm text-gray-600 mb-4">
             <thead>
               <tr>
-                <th class="py-1 px-2 font-medium text-slate-700">CNIC No : {{ cnicResult?.cnic }}</th> 
+                <th class="py-1 px-2 font-medium text-slate-700">CNIC No : {{ cnicResult?.cnic }}</th>
               </tr>
               <tr>
                 <th class="py-1 px-2 font-medium text-slate-700">Registration No:</th>
@@ -899,7 +943,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                 <td class="py-1 px-2" v-for="value in cnicResult?.data?.data?.files" :key="value">{{ value?.reg_no }}</td>
               </tr>
             </tbody>
-            </table>
+          </table>
         </div>
 
         <div class="mt-6 flex justify-end gap-2">
@@ -917,13 +961,11 @@ const filteredUnassignChatsByCompany = computed(() => {
     </Modal>
 
     <!-- Image Viewer Modal -->
-    <Modal :show="showImageViewer" @close="closeImageViewer" max-width="max-w-4xl" >
+    <Modal :show="showImageViewer" @close="closeImageViewer" max-width="max-w-4xl">
       <div class="relative">
-        <!-- Header -->
         <div class="flex items-center justify-between p-2 border-b border-slate-200">
-          
-          <button 
-            @click="closeImageViewer" 
+          <button
+            @click="closeImageViewer"
             class="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -932,19 +974,16 @@ const filteredUnassignChatsByCompany = computed(() => {
             </svg>
           </button>
         </div>
-        
-        <!-- Image Content -->
         <div class="p-4 flex items-center justify-center bg-gray-900 bg-opacity-95">
-          <img 
-            :src="currentImageUrl" 
+          <img
+            :src="currentImageUrl"
             :alt="currentImageName"
             class="max-w-full max-h-[80vh] object-contain rounded-lg"
           />
         </div>
-        
         <div class="flex justify-end gap-3 p-2 border-t border-slate-200 bg-white">
-          <a 
-            :href="currentImageUrl" 
+          <a
+            :href="currentImageUrl"
             :download="currentImageName"
             target="_blank"
             rel="noopener"
@@ -957,7 +996,7 @@ const filteredUnassignChatsByCompany = computed(() => {
             </svg>
             Download
           </a>
-          <button 
+          <button
             @click="closeImageViewer"
             class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
           >
@@ -969,142 +1008,33 @@ const filteredUnassignChatsByCompany = computed(() => {
 
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
       style="height: calc(100vh - 85px);">
-      <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+
+      <!-- ═══════════════════ LEFT SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-r border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
+
+        <!-- Recent chats header -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Recent chats</div>
-            <!-- <div
-              class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              {{chats.filter(c => c.is_online).length}} online
-            </div> -->
-          </div>
-        </div>
-        <!-- {{ chat?.company_rel?.color || '#cbd5e1' }} -->
-        <!-- Chat items list recent chats -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in filteredOpenChats" :key="chat.id" @click="selectChat(chat)" :class="[
-              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
-                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
-                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                    : 'hover:bg-slate-50'
-              ]"> 
-              
-            <!-- Avatar -->
-            <div class="relative flex-shrink-0" >
-              <div
-                :class="[
-                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
-                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                    ? 'text-white'
-                    : 'text-slate-500'
-                ]"
-                :style="{
-                  backgroundColor:
-                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                      ? (chat?.company_rel?.color || '#6366f1')
-                      : (chat?.company_rel?.color || '#cbd5e1')
-                }"
-              >
-                #{{ chat.id }}
-              </div>
-              <span :class="[
-                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
-                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
-              ]"></span>
-              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
-                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
-              </span>
-            </div>
-          <!-- {{chat.latest_message}} -->
-            <!-- Text Info -->
-            <div class="flex-1 min-w-0 pr-12" >
-              <div class="flex items-center gap-2 mb-0.5">
-                <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat: {{chat?.customer_name }}
-                </span>
-                <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat # {{ chat.id }}
-                </span>
-                <span v-if="chat.unread_count > 0"
-                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
-                  style="min-width: 20px; height: 18px;">
-                  {{ chat.unread_count }}
-                </span>
-                <span
-                  v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
-                  :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
-                >
-                  {{ slaBadgeLabel(chat) }}
-                </span>
-              </div>
-              
-              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
-                {{ getUserInfo(chat?.latest_message?.message) }}
-              </p>
-              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1" >
-                {{chat?.customer_name}}
-                <!-- {{ getUserInfo(chat?.latest_message?.message) }} -->
-              </p>
-              <p class="text-xs text-slate-500 truncate mb-1" v-else>
-                {{ chat?.latest_message?.message || 'No messages' }}
-              </p>
-              
-              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
-                </svg>
-                {{ chat.current_url }}
-              </p>
-            </div>
-
-            <!-- Action buttons -->
-            <div class="absolute top-2 right-2 flex flex-col gap-1" >
-              <button @click="closeChat(chat, $event)" title="Close Chat"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-600 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round">
-                  <path d="M18 6 6 18" />
-                  <path d="M6 6l12 12" />
-                </svg>
-              </button>
-              <!-- <button @click="deleteChat(chat, $event)" title="Delete Chat"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14H6L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4h6v2" />
-                </svg>
-              </button> -->
-            </div>
           </div>
         </div>
 
-        <div class="px-4 py-4 border-b border-slate-100">
-          <div class="flex items-end justify-between">
-            <div>Previous chats</div>
-          </div>
-        </div>
-        
-        <!-- Chat items list previous chats -->
+        <!-- Recent (open) chats list -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in filteredClosedChats" :key="chat.id" @click="selectChat(chat)" :class="[
+          <div
+            v-for="chat in filteredOpenChats"
+            :key="chat.id"
+            @click="selectChat(chat)"
+            :class="[
               'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
-                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
-                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                    : 'hover:bg-slate-50'
-              ]"> 
+              selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                  : 'hover:bg-slate-50'
+            ]"
+          >
             <!-- Avatar -->
             <div class="relative flex-shrink-0">
               <div
@@ -1127,23 +1057,26 @@ const filteredUnassignChatsByCompany = computed(() => {
                 'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
                 chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
               ]"></span>
-              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
-                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
-              </span>
+              <span
+                v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id"
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping"
+              ></span>
             </div>
 
             <!-- Text Info -->
-            <div class="flex-1 min-w-0 pr-12" >
+            <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
-               <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat: {{chat?.customer_name }}
+                <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat: {{ chat?.customer_name }}
                 </span>
                 <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
                   Chat # {{ chat.id }}
                 </span>
-                <span v-if="chat.unread_count > 0"
+                <span
+                  v-if="chat.unread_count > 0"
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
-                  style="min-width: 20px; height: 18px;">
+                  style="min-width: 20px; height: 18px;"
+                >
                   {{ chat.unread_count }}
                 </span>
                 <span
@@ -1154,12 +1087,11 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </span>
               </div>
 
-             <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
-               {{ getUserInfo(chat?.latest_message?.message) }}
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
               </p>
-              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1" >
-                {{chat?.customer_name}}
-                <!-- {{ getUserInfo(chat?.latest_message?.message) }} -->
+              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1">
+                {{ chat?.customer_name }}
               </p>
               <p class="text-xs text-slate-500 truncate mb-1" v-else>
                 {{ chat?.latest_message?.message || 'No messages' }}
@@ -1167,21 +1099,141 @@ const filteredUnassignChatsByCompany = computed(() => {
 
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                 </svg>
                 {{ chat.current_url }}
               </p>
             </div>
 
-            <!-- Action buttons -->
+            <!-- Action buttons (Transfer + Close) -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
-              <button @click="deleteChat(chat, $event)" title="Delete Chat"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round">
+              <button
+                @click.stop="openTransferModal(chat)"
+                title="Transfer Chat"
+                :disabled="chat?.assigned_agent_id !== auth_user.id"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-amber-100 text-amber-600 hover:bg-amber-600 hover:text-white transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M5 12h14" />
+                  <path d="M12 5l7 7-7 7" />
+                </svg>
+              </button>
+              <button
+                @click.stop="closeChat(chat, $event)"
+                title="Close Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-600 hover:text-white transition-colors duration-150"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M18 6 6 18" />
+                  <path d="M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Previous chats header -->
+        <div class="px-4 py-4 border-b border-slate-100">
+          <div class="flex items-end justify-between">
+            <div>Previous chats</div>
+          </div>
+        </div>
+
+        <!-- Closed chats list -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div
+            v-for="chat in filteredClosedChats"
+            :key="chat.id"
+            @click="selectChat(chat)"
+            :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+              selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                  : 'hover:bg-slate-50'
+            ]"
+          >
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+              <div
+                :class="[
+                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
+                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                    ? 'text-white'
+                    : 'text-slate-500'
+                ]"
+                :style="{
+                  backgroundColor:
+                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                      ? (chat?.company_rel?.color || '#6366f1')
+                      : (chat?.company_rel?.color || '#cbd5e1')
+                }"
+              >
+                #{{ chat.id }}
+              </div>
+              <span :class="[
+                'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
+                chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
+              ]"></span>
+              <span
+                v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id"
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping"
+              ></span>
+            </div>
+
+            <!-- Text Info -->
+            <div class="flex-1 min-w-0 pr-12">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat: {{ chat?.customer_name }}
+                </span>
+                <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
+                  Chat # {{ chat.id }}
+                </span>
+                <span
+                  v-if="chat.unread_count > 0"
+                  class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
+                  style="min-width: 20px; height: 18px;"
+                >
+                  {{ chat.unread_count }}
+                </span>
+                <span
+                  v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
+                  :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
+                >
+                  {{ slaBadgeLabel(chat) }}
+                </span>
+              </div>
+
+              <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
+                {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1">
+                {{ chat?.customer_name }}
+              </p>
+              <p class="text-xs text-slate-500 truncate mb-1" v-else>
+                {{ chat?.latest_message?.message || 'No messages' }}
+              </p>
+
+              <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+                {{ chat.current_url }}
+              </p>
+            </div>
+
+            <!-- Action buttons (Delete only for closed) -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1">
+              <button
+                @click.stop="deleteChat(chat, $event)"
+                title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6l-1 14H6L5 6" />
                   <path d="M10 11v6M14 11v6" />
@@ -1191,7 +1243,6 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
           </div>
         </div>
-
       </aside>
 
       <!-- ═══════════════════ MAIN PANEL ═══════════════════ -->
@@ -1201,14 +1252,19 @@ const filteredUnassignChatsByCompany = computed(() => {
           <div class="flex items-center gap-3 px-5 py-3.5 bg-white border-b border-slate-200 shadow-sm">
             <div
               class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono flex-shrink-0"
-              style="background: linear-gradient(135deg, #4f46e5, #818cf8);">
+              style="background: linear-gradient(135deg, #4f46e5, #818cf8);"
+            >
               #{{ selectedChat.id }}
             </div>
             <div class="flex-1 min-w-0">
               <div class="font-bold text-gray-900 text-sm tracking-tight">Chat #{{ selectedChat.id }}</div>
               <div class="flex items-center gap-3 mt-0.5 flex-wrap">
-                <a v-if="selectedChat.current_url" :href="selectedChat.current_url" target="_blank"
-                  class="text-xs text-indigo-500 hover:underline truncate max-w-xs">{{ selectedChat.current_url }}</a>
+                <a
+                  v-if="selectedChat.current_url"
+                  :href="selectedChat.current_url"
+                  target="_blank"
+                  class="text-xs text-indigo-500 hover:underline truncate max-w-xs"
+                >{{ selectedChat.current_url }}</a>
                 <span v-if="selectedChat.ip || selectedChat.ip_address" class="text-xs text-slate-400 font-mono">
                   {{ selectedChat.ip || selectedChat.ip_address }}
                 </span>
@@ -1216,17 +1272,24 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
 
             <div class="flex items-center gap-2 flex-shrink-0">
-              <!-- header buttons  -->
-              <button @click="openFeedbackPanel(selectedChat)" title="Feedback"
-                class="h-8 px-3 rounded-lg flex items-center justify-center bg-amber-100 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors duration-150">
+              <button
+                @click="openFeedbackPanel(selectedChat)"
+                title="Feedback"
+                class="h-8 px-3 rounded-lg flex items-center justify-center bg-amber-100 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors duration-150"
+              >
                 <span class="text-xs font-semibold">Feedback</span>
-                <span v-if="feedbacks.length"
+                <span
+                  v-if="feedbacks.length"
                   class="ml-2 inline-flex items-center justify-center bg-amber-700 text-white text-[10px] font-bold rounded-full px-1.5 leading-none"
-                  style="height: 16px; min-width: 16px;">{{ feedbacks.length }}</span>
+                  style="height: 16px; min-width: 16px;"
+                >{{ feedbacks.length }}</span>
               </button>
 
-              <button @click="showUserInfoForm(selectedChat)" title="Send Info Form"
-                class="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150">
+              <button
+                @click="showUserInfoForm(selectedChat)"
+                title="Send Info Form"
+                class="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-100 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-colors duration-150"
+              >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 12 3 3l18 9-18 9 3-9Z" />
                 </svg>
@@ -1241,15 +1304,14 @@ const filteredUnassignChatsByCompany = computed(() => {
               >
                 {{ slaBadgeLabel(selectedChat) }}
               </div>
-              
+
               <div :class="[
                 'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest border',
                 selectedChat.is_online
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                   : 'bg-slate-100 text-slate-400 border-slate-200'
               ]">
-                <span
-                  :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
+                <span :class="['w-1.5 h-1.5 rounded-full', selectedChat.is_online ? 'bg-emerald-500' : 'bg-slate-400']"></span>
                 {{ selectedChat.is_online ? 'Online' : 'Offline' }}
               </div>
             </div>
@@ -1257,30 +1319,24 @@ const filteredUnassignChatsByCompany = computed(() => {
 
           <!-- Chat Feedback Panel -->
           <div v-if="showFeedbackPanel" class="bg-white border-b border-slate-200">
-            <div class="px-5 py-2 flex items-center justify-between">
-              <!-- <div class="text-sm font-bold text-slate-800"></div>
-              <button type="button" @click="closeFeedbackPanel"
-                class="text-xs font-semibold text-slate-500 hover:text-slate-700">Close</button> -->
-            </div>
+            <div class="px-5 py-2 flex items-center justify-between"></div>
 
             <div class="px-5 pb-4 space-y-3">
-              <div v-if="feedbackError"
-                class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2">
+              <div v-if="feedbackError" class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2">
                 {{ feedbackError }}
               </div>
 
               <form @submit.prevent="submitFeedback" class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-
                 <div class="md:col-span-4" v-for="inquiryList in inquiries" :key="inquiryList.id">
-                  <select 
-                    class="w-full min-h-28 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30" 
+                  <select
+                    class="w-full min-h-28 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                     multiple
                     v-model="selectedInquiries[inquiryList.id]"
                   >
                     <option disabled value="">{{ inquiryList.name }}</option>
-                    <option 
-                      v-for="inqiry in inquiryList.clientTemperature" 
-                      :key="inqiry.id" 
+                    <option
+                      v-for="inqiry in inquiryList.clientTemperature"
+                      :key="inqiry.id"
                       :value="{ id: inqiry.id, name: inqiry.name }"
                     >
                       {{ inqiry.name }}
@@ -1289,29 +1345,34 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </div>
 
                 <div class="md:col-span-4">
-                    <select v-model="feedbackForm.registration_no" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                  <select v-model="feedbackForm.registration_no" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
                     <option disabled value="">Registration No</option>
                     <option value="">Unknown</option>
-                    <option v-for="message in filteredRegistrationNo" :value="getUserInfo(message).registration_no" >
-                     {{ getUserInfo(message).registration_no }}
+                    <option v-for="message in filteredRegistrationNo" :value="getUserInfo(message).registration_no">
+                      {{ getUserInfo(message).registration_no }}
                     </option>
                   </select>
                 </div>
-                
+
                 <div class="md:col-span-4 flex items-center justify-end gap-2">
-                    <button type="submit" :disabled="feedbackSaving"
-                      class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:ring-offset-2">
-                      {{ feedbackSaving ? 'Saving...' : 'Save' }}
-                    </button>
-                    <button type="button" @click="closeFeedbackPanel"
-                      class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:ring-offset-2">
-                      Cancel
-                    </button>
+                  <button
+                    type="submit"
+                    :disabled="feedbackSaving"
+                    class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:ring-offset-2"
+                  >
+                    {{ feedbackSaving ? 'Saving...' : 'Save' }}
+                  </button>
+                  <button
+                    type="button"
+                    @click="closeFeedbackPanel"
+                    class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:ring-offset-2"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </form>
 
               <div class="border-t border-slate-100 pt-3 max-h-60 overflow-y-auto">
-                
                 <div class="flex items-center justify-between mb-2">
                   <div class="text-xs font-semibold text-slate-600 uppercase tracking-wider">History</div>
                   <div v-if="feedbackLoading" class="text-xs text-slate-400">Loading...</div>
@@ -1321,8 +1382,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                   No feedback yet.
                 </div>
 
-                <div v-for="fb in feedbacks" :key="fb.id"
-                  class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-2">
+                <div v-for="fb in feedbacks" :key="fb.id" class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-2">
                   <div class="flex items-center justify-between gap-3">
                     <div class="text-xs text-slate-400 flex-shrink-0">
                       {{ formatFeedbackDate(fb.created_at) }}
@@ -1332,170 +1392,166 @@ const filteredUnassignChatsByCompany = computed(() => {
                     {{ fb.inquiry_name }} | <strong>Reg: {{ fb.registration ?? 'N/A' }}</strong>
                   </div>
                 </div>
-
               </div>
             </div>
           </div>
 
           <!-- Messages scroll area -->
           <div class="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-3">
-            <div v-for="msg in messages" :key="msg.id"
-              :class="['flex', msg.sender_type === 'agent' ? 'justify-end' : 'justify-start']">
-              <!-- User Info Request -->
+            <div v-for="msg in messages" :key="msg.id" :class="['flex', msg.sender_type === 'agent' ? 'justify-end' : 'justify-start']">
 
-              <div v-if="msg.message_type === 'prechat_info_request'"
-                class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
+              <!-- Prechat info request -->
+              <div v-if="msg.message_type === 'prechat_info_request'" class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
                   Visitor Details Form Requested
                 </div>
               </div>
 
-              <div v-else-if="msg.message_type === 'prechat_info_response'"
-                class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
-                  <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
-                    Visitor Details Received:
-                  </div>
-                  <div class="text-xs text-cyan-800 space-y-1">
-                    <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
-                    <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
-                  </div>
+              <!-- Prechat info response -->
+              <div v-else-if="msg.message_type === 'prechat_info_response'" class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
+                <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
+                  Visitor Details Received:
+                </div>
+                <div class="text-xs text-cyan-800 space-y-1">
+                  <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                  <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                </div>
               </div>
 
-              <div v-else-if="msg.message_type === 'user_info_request'"
-                class="max-w-sm bg-blue-50 border border-blue-200 rounded-xl p-3">
+              <!-- User info request -->
+              <div v-else-if="msg.message_type === 'user_info_request'" class="max-w-sm bg-blue-50 border border-blue-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-blue-700 mb-1.5 flex items-center gap-1.5">
                   <span>📋</span> User Information Form Request Sent
                 </div>
-                 
               </div>
-             
-              <!-- User Info Response -->
-              <div v-else-if="msg.message_type === 'user_info_response'"
-                class="max-w-sm bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-                  <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
-                    User Information Received:
-                  </div>
-                  <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line" v-if="msg?.message_type === 'user_info_response'" >
-                   
-                    <div class="text-xs text-emerald-700 space-y-1">
-                      <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
-                      <div><strong>Email:</strong> {{ getUserInfo(msg).email }}</div>
-                      <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
-                      <div><strong>Reg No:</strong> {{ getUserInfo(msg).registration_no }}</div>
-                    </div>
-                  </div>
-                <div class="text-xs text-emerald-600 leading-relaxed whitespace-pre-line" v-else>{{ msg.message  }}</div>
-                
+
+              <!-- User info response -->
+              <div v-else-if="msg.message_type === 'user_info_response'" class="max-w-sm bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
+                  User Information Received:
+                </div>
+                <div class="text-xs text-emerald-700 space-y-1">
+                  <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
+                  <div><strong>Email:</strong> {{ getUserInfo(msg).email }}</div>
+                  <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+                  <div><strong>Reg No:</strong> {{ getUserInfo(msg).registration_no }}</div>
+                </div>
+
                 <div class="flex flex-wrap items-center gap-2 mt-3">
-                  <button type="button" @click="fetchExternalDataForMessage(selectedChat, msg)"
+                  <button
+                    type="button"
+                    @click="fetchExternalDataForMessage(selectedChat, msg)"
                     class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                    :disabled="externalFetching">
+                    :disabled="externalFetching"
+                  >
                     {{ externalFetching ? 'Fetching...' : 'Fetch Data' }}
                   </button>
-                 
-                  <button v-if="canSendHtmlForMessage(selectedChat, msg)"
-                    type="button" @click="sendExternalHtmlForMessage(selectedChat, msg)"
+
+                  <button
+                    v-if="canSendHtmlForMessage(selectedChat, msg)"
+                    type="button"
+                    @click="sendExternalHtmlForMessage(selectedChat, msg)"
                     class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                    :disabled="externalHtmlSending">
+                    :disabled="externalHtmlSending"
+                  >
                     {{ externalHtmlSending ? 'Sending...' : 'Send PDF' }}
-                    <!-- {{ externalHtmlSending ? 'Sending...' : 'Send HTML' }} -->
                   </button>
                 </div>
 
-                <div v-if="selectedChat?.external_api_status === 'error' && selectedChat?.external_api_error"
-                  class="mt-2 text-xs text-red-700 whitespace-pre-line">
+                <div
+                  v-if="selectedChat?.external_api_status === 'error' && selectedChat?.external_api_error"
+                  class="mt-2 text-xs text-red-700 whitespace-pre-line"
+                >
                   {{ selectedChat.external_api_error }}
                 </div>
               </div>
 
-              <!-- External HTML message -->
-              <div v-else-if="msg.message_type === 'external_data_html'"
-                class="max-w-xl bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+              <!-- External HTML / PDF sent message -->
+              <div v-else-if="msg.message_type === 'external_data_html'" class="max-w-xl bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
                 <div class="text-xs font-bold text-slate-700 mb-2">PDF Sent</div>
-                 <div v-if="attachmentViewUrl(msg)" class="mt-2">
-                    <img v-if="msg.attachment_is_image" :src="attachmentViewUrl(msg)"
-                      :alt="msg.attachment_name || 'Attachment'"
-                      class="max-w-[180px] max-h-40 rounded border border-gray-200 object-cover cursor-pointer"
-                      @click="window.open(attachmentViewUrl(msg), '_blank')" />
-                    
-                    <div v-if="msg.attachment_is_image" class="mt-1 text-right">
-                      <a :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener"
-                        class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline">
+                <div v-if="attachmentViewUrl(msg)" class="mt-2">
+                  <img
+                    v-if="msg.attachment_is_image"
+                    :src="attachmentViewUrl(msg)"
+                    :alt="msg.attachment_name || 'Attachment'"
+                    class="max-w-[180px] max-h-40 rounded border border-gray-200 object-cover cursor-pointer"
+                    @click="openImageViewer(attachmentViewUrl(msg), msg.attachment_name)"
+                  />
+                  <div v-if="msg.attachment_is_image" class="mt-1 text-right">
+                    <a
+                      :href="attachmentDownloadUrl(msg)"
+                      :download="msg.attachment_name"
+                      target="_blank"
+                      rel="noopener"
+                      class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline"
+                    >
                       <svg viewBox="0 0 24 24" fill="none" class="h-4 w-4" aria-hidden="true">
                         <path d="M12 3v10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                         <path d="M8 11l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                         <path d="M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                       </svg>
                       Download
-                      </a>
-                    </div>
-
-                    <a v-else :href="attachmentDownloadUrl(msg)" :download="msg.attachment_name" target="_blank" rel="noopener"
-                      class="text-xs underline break-all">
-                      Download {{ msg.attachment_name || 'file' }}
                     </a>
+                  </div>
+                  <a
+                    v-else
+                    :href="attachmentDownloadUrl(msg)"
+                    :download="msg.attachment_name"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-xs underline break-all"
+                  >
+                    Download {{ msg.attachment_name || 'file' }}
+                  </a>
                 </div>
-                <!-- <iframe v-if="msg.attachment_view_url"
-                  :src="msg.attachment_view_url"
-                  sandbox
-                  class="w-full rounded-lg border border-slate-200 bg-white"
-                  style="height: 320px;"
-                />
-                <iframe v-else
-                  :srcdoc="msg.message"
-                  sandbox
-                  class="w-full rounded-lg border border-slate-200 bg-white"
-                  style="height: 320px;"
-                /> -->
               </div>
 
-              <!-- Message with attachments -->
-              <div v-else class="flex flex-col gap-1.5"
-                :class="msg.sender_type === 'agent' ? 'items-end' : 'items-start'">
-
+              <!-- Regular message with optional attachment -->
+              <div v-else class="flex flex-col gap-1.5" :class="msg.sender_type === 'agent' ? 'items-end' : 'items-start'">
                 <template v-if="msg.attachment_view_url">
-                  <!-- <img v-if="msg.attachment_is_image" :src="msg.attachment_view_url"
+                  <img
+                    v-if="msg.attachment_is_image"
+                    :src="msg.attachment_view_url"
                     :alt="msg.attachment_name || 'Attachment'"
                     class="max-w-xs max-h-48 rounded-xl border border-slate-200 object-cover shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
-                    @click="window.open(msg.attachment_view_url, '_blank')" /> -->
-                    <img 
-                      v-if="msg.attachment_is_image" 
-                      :src="msg.attachment_view_url"
-                      :alt="msg.attachment_name || 'Attachment'"
-                      class="max-w-xs max-h-48 rounded-xl border border-slate-200 object-cover shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
-                      @click="openImageViewer(msg.attachment_view_url, msg.attachment_name)"
-                    />
-
-
-                  <a v-else :href="msg.attachment_download_url || msg.attachment_view_url"
-                    :download="msg.attachment_name" :class="[
+                    @click="openImageViewer(msg.attachment_view_url, msg.attachment_name)"
+                  />
+                  <a
+                    v-else
+                    :href="msg.attachment_download_url || msg.attachment_view_url"
+                    :download="msg.attachment_name"
+                    :class="[
                       'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-colors',
                       msg.sender_type === 'agent'
                         ? 'bg-indigo-500 border-indigo-400 text-white hover:bg-indigo-400'
                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    ]">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                      stroke-linecap="round" stroke-linejoin="round">
-                      <path
-                        d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    ]"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                     </svg>
                     <span class="truncate max-w-[160px]">{{ msg.attachment_name || 'Download file' }}</span>
                   </a>
                 </template>
 
-                <!-- Regular text bubble -->
-                <div v-if="msg.message" :class="[
-                  'max-w-xs lg:max-w-md px-4 py-2.5 text-sm leading-relaxed break-words',
-                  msg.sender_type === 'agent'
-                    ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm shadow-indigo-200 shadow-md'
-                    : 'bg-white text-gray-800 rounded-2xl rounded-bl-sm border border-slate-200 shadow-sm'
-                ]">
+                <div
+                  v-if="msg.message"
+                  :class="[
+                    'max-w-xs lg:max-w-md px-4 py-2.5 text-sm leading-relaxed break-words',
+                    msg.sender_type === 'agent'
+                      ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm shadow-indigo-200 shadow-md'
+                      : 'bg-white text-gray-800 rounded-2xl rounded-bl-sm border border-slate-200 shadow-sm'
+                  ]"
+                >
                   {{ msg.message }}
                 </div>
               </div>
 
-              <div class="mt-1 text-[11px] text-slate-400 flex items-center gap-1"
-                :class="msg.sender_type === 'agent' ? 'justify-end pr-1' : 'justify-start pl-1'">
+              <!-- Timestamp + read receipt -->
+              <div
+                class="mt-1 text-[11px] text-slate-400 flex items-center gap-1"
+                :class="msg.sender_type === 'agent' ? 'justify-end pr-1' : 'justify-start pl-1'"
+              >
                 <span>{{ formatMessageTime(msg.created_at) }}</span>
                 <span v-if="msg.sender_type === 'agent'" :class="isMessageReadByRecipient(msg) ? 'text-sky-500' : 'text-slate-400'">
                   {{ isMessageReadByRecipient(msg) ? '✓✓' : '✓' }}
@@ -1505,69 +1561,70 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
 
           <!-- ── Reply bar ── -->
-          <div class="bg-white border-t border-slate-200 transition-all duration-200"
-            :class="isDraggingOver ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50' : ''" @dragover="onDragOver"
-            @dragleave="onDragLeave" @drop="onDrop">
+          <div
+            class="bg-white border-t border-slate-200 transition-all duration-200"
+            :class="isDraggingOver ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50' : ''"
+            @dragover="onDragOver"
+            @dragleave="onDragLeave"
+            @drop="onDrop"
+          >
             <!-- Attachment previews -->
             <div v-if="attachedFiles.length" class="flex flex-wrap gap-2 px-4 pt-3 pb-1">
-              <div v-for="(item, index) in attachedFiles" :key="index"
-                class="relative group flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg overflow-hidden">
-                <!-- Image thumbnail -->
+              <div
+                v-for="(item, index) in attachedFiles"
+                :key="index"
+                class="relative group flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg overflow-hidden"
+              >
                 <template v-if="item.isImage">
                   <img :src="item.preview" :alt="item.file.name" class="w-14 h-14 object-cover" />
                 </template>
-                <!-- File chip -->
                 <template v-else>
                   <div class="flex items-center gap-2 px-3 py-2">
                     <span class="text-base leading-none">{{ getFileIcon(item.file) }}</span>
                     <div class="min-w-0">
                       <p class="text-xs font-semibold text-slate-700 truncate max-w-[120px]">{{ item.file.name }}</p>
-                 
                     </div>
                   </div>
                 </template>
-
-                <!-- Remove button -->
-                <button @click="removeAttachment(index)"
+                <button
+                  @click="removeAttachment(index)"
                   class="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-slate-700 bg-opacity-80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
-                  title="Remove">
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
-                    stroke-linecap="round">
+                  title="Remove"
+                >
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
               </div>
-
             </div>
 
             <!-- Drag-over hint -->
-            <div v-if="isDraggingOver"
-              class="flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-indigo-600">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round">
-                <path
-                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            <div v-if="isDraggingOver" class="flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-indigo-600">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
               Drop files to attach
             </div>
 
+            <!-- Error message -->
             <div v-if="sendError" class="px-4 pb-2">
-              <div
-                class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start justify-between gap-2">
+              <div class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start justify-between gap-2">
                 <span class="whitespace-pre-line">{{ sendError }}</span>
                 <button type="button" class="font-bold leading-none" @click="sendError = ''">×</button>
               </div>
             </div>
 
             <!-- Input row -->
-            <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="flex items-center gap-0 px-4 py-3">
-
+            <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="relative flex items-center gap-0 px-4 py-3">
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
               <!-- Chat Closed Overlay -->
-              <div v-if="selectedChat?.status === 'close' && dismissedClosedChatId !== selectedChat.id" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10">
+              <div
+                v-if="selectedChat?.status === 'close' && dismissedClosedChatId !== selectedChat.id"
+                class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10"
+              >
                 <div class="text-center">
                   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-3 text-slate-400">
                     <path d="M18 6 6 18" />
@@ -1575,42 +1632,58 @@ const filteredUnassignChatsByCompany = computed(() => {
                   </svg>
                   <p class="text-sm font-semibold text-slate-600">Chat Closed</p>
                   <p class="text-xs text-slate-400 mt-1 mb-4">No further messages can be sent.</p>
-                  <button @click="dismissClosedOverlay" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium rounded-lg transition-colors">
+                  <button
+                    @click="dismissClosedOverlay"
+                    class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium rounded-lg transition-colors"
+                  >
                     Dismiss
                   </button>
                 </div>
               </div>
 
-              <!-- <div v-if="isPrechatPending"
-                class="mr-3 text-xs text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-lg px-3 py-2">
-                Waiting for visitor name &amp; phone.
-              </div> -->
-
               <!-- Attach button -->
-              <button type="button" @click="triggerFileInput" title="Attach files or Drag and drop here"
+              <button
+                type="button"
+                @click="triggerFileInput"
+                title="Attach files or Drag and drop here"
                 class="flex-shrink-0 flex items-center justify-center w-9 h-9 mr-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors border border-slate-200 hover:border-indigo-200"
                 :disabled="selectedChat?.status === 'close'"
-                :class="[attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <path
-                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                :class="[
+                  attachedFiles.length ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : '',
+                  selectedChat?.status === 'close' ? 'opacity-50 cursor-not-allowed' : ''
+                ]"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                 </svg>
-                <!-- Badge count -->
-                <span v-if="attachedFiles.length"
+                <span
+                  v-if="attachedFiles.length"
                   class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center leading-none"
-                  style="font-size: 9px;">{{ attachedFiles.length }}</span>
+                  style="font-size: 9px;"
+                >{{ attachedFiles.length }}</span>
               </button>
 
-              <!-- Text input -->
-              <input v-model="replyMessage" type="text" placeholder="Type your reply…"
+              <!-- Textarea -->
+              <textarea
+                v-model="replyMessage"
+                rows="1"
+                placeholder="Type your reply…"
                 :disabled="selectedChat?.status === 'close'"
-                :class="['flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400', (selectedChat?.status === 'close') ? 'opacity-50 cursor-not-allowed' : '']" />
+                :class="[
+                  'flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-l-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400 resize-none overflow-hidden',
+                  selectedChat?.status === 'close' ? 'opacity-50 cursor-not-allowed' : ''
+                ]"
+              ></textarea>
 
               <!-- Send button -->
-              <button type="submit"
+              <button
+                type="submit"
                 :disabled="selectedChat?.status === 'close'"
-                :class="['flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-r-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer', (selectedChat?.status === 'close') ? 'opacity-60 cursor-not-allowed' : '']">
+                :class="[
+                  'flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-r-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer',
+                  selectedChat?.status === 'close' ? 'opacity-60 cursor-not-allowed' : ''
+                ]"
+              >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 12 3 3l18 9-18 9 3-9Z" />
                 </svg>
@@ -1618,15 +1691,12 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </form>
           </div>
-
         </template>
 
         <!-- Empty state -->
         <div v-else class="flex-1 flex flex-col items-center justify-center gap-4 text-slate-400 px-12">
-          <div
-            class="w-20 h-20 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
-            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"
-              stroke-linecap="round" stroke-linejoin="round">
+          <div class="w-20 h-20 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
@@ -1635,49 +1705,43 @@ const filteredUnassignChatsByCompany = computed(() => {
             <p class="text-sm text-slate-400">Choose a chat from the sidebar to get started</p>
           </div>
         </div>
-
       </main>
 
-      <!-- RIGHT SIDEBAR -->
+      <!-- ═══════════════════ RIGHT SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-l border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
-        <!-- Sidebar top stats -->
+
+        <!-- Unassign chats header -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Unassign chats</div>
-            <div
-              class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
+            <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              {{chats.filter(c => c.is_online).length}} online
+              {{ chats.filter(c => c.is_online).length }} online
             </div>
           </div>
         </div>
-        <!-- Chat items list Unassign chats -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1" >
-          <div v-for="chat in filteredUnassignChatsByCompany" :key="chat.id" @click="selectChat(chat)" :class="[
-            'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-            selectedChat?.id === chat.id 
-            ? 'bg-indigo-50 ring-1 ring-indigo-200'
-            : chat.unread_count > 0
-            ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-            : 'hover:bg-slate-50'
-          ]">
 
+        <!-- Unassign chats list -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div
+            v-for="chat in filteredUnassignChatsByCompany"
+            :key="chat.id"
+            @click="selectChat(chat)"
+            :class="[
+              'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
+              selectedChat?.id === chat.id
+                ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                : chat.unread_count > 0
+                  ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                  : 'hover:bg-slate-50'
+            ]"
+          >
             <!-- Avatar -->
             <div class="relative flex-shrink-0">
               <div
-                :class="[
-                  'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
-                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                    ? 'text-white'
-                    : 'text-slate-500'
-                ]"
-                :style="{
-                  backgroundColor:
-                    selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                      ? (chat?.company_rel?.color || '#6366f1')
-                      : (chat?.company_rel?.color || '#cbd5e1')
-                }"
+                class="w-10 h-10 rounded-xl flex items-center justify-center text-slate-500 text-xs font-bold font-mono"
+                :style="{ backgroundColor: chat?.company_rel?.color || '#cbd5e1' }"
               >
                 #{{ chat.id }}
               </div>
@@ -1685,20 +1749,20 @@ const filteredUnassignChatsByCompany = computed(() => {
                 'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
                 chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
               ]"></span>
-              <span v-if="chat.unread_count > 0"
-                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
-              </span>
+              <span v-if="chat.unread_count > 0" class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping"></span>
             </div>
 
             <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat #{{ chat.id }} 
+                  Chat #{{ chat.id }}
                 </span>
-                <span v-if="chat.unread_count > 0"
+                <span
+                  v-if="chat.unread_count > 0"
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
-                  style="min-width: 20px; height: 18px;">
+                  style="min-width: 20px; height: 18px;"
+                >
                   {{ chat.unread_count }}
                 </span>
                 <span
@@ -1708,26 +1772,21 @@ const filteredUnassignChatsByCompany = computed(() => {
                   {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
-           
+
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
-               {{ getUserInfo(chat?.latest_message?.message) }}
+                {{ getUserInfo(chat?.latest_message?.message) }}
               </p>
-              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1" >
-                {{chat?.customer_name}}
-                <!-- {{ getUserInfo(chat?.latest_message?.message) }} -->
+              <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1">
+                {{ chat?.customer_name }}
               </p>
               <p class="text-xs text-slate-500 truncate mb-1" v-else>
                 {{ chat?.latest_message?.message || 'No messages' }}
               </p>
 
-
-
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                 </svg>
                 {{ chat.current_url }}
               </p>
@@ -1735,10 +1794,12 @@ const filteredUnassignChatsByCompany = computed(() => {
 
             <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
-              <button @click="deleteChat(chat, $event)" title="Delete Chat"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round">
+              <button
+                @click.stop="deleteChat(chat, $event)"
+                title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6l-1 14H6L5 6" />
                   <path d="M10 11v6M14 11v6" />
@@ -1749,30 +1810,34 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
         </div>
 
+        <!-- Other chats header -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Other chats</div>
           </div>
-        </div> 
+        </div>
 
-        <!-- Chat items list Other chats -->
-         <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div v-for="chat in filteredGlobalChats" :key="chat.id" @click="selectChat(chat)" :class="[
+        <!-- Other chats list -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+          <div
+            v-for="chat in filteredGlobalChats"
+            :key="chat.id"
+            @click="selectChat(chat)"
+            :class="[
               'relative flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-150 group',
-                selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                  ? 'bg-indigo-50 ring-1 ring-indigo-200'
-                  : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
-                    ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
-                    : 'hover:bg-slate-50'
-              ]">
-           
+              selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
+                ? 'bg-indigo-50 ring-1 ring-indigo-200'
+                : chat.unread_count > 0 && chat?.assigned_agent_id === auth_user.id
+                  ? 'bg-red-50 ring-1 ring-red-300 animate-pulse hover:bg-red-50'
+                  : 'hover:bg-slate-50'
+            ]"
+          >
+            <!-- Avatar -->
             <div class="relative flex-shrink-0">
               <div
                 :class="[
                   'w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono',
-                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id
-                    ? 'text-white'
-                    : 'text-slate-500'
+                  selectedChat?.id === chat.id && chat?.assigned_agent_id === auth_user.id ? 'text-white' : 'text-slate-500'
                 ]"
                 :style="{
                   backgroundColor:
@@ -1787,22 +1852,26 @@ const filteredUnassignChatsByCompany = computed(() => {
                 'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white',
                 chat.is_online ? 'bg-emerald-500' : 'bg-slate-300'
               ]"></span>
-              <span v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id "
-                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping">
-              </span>
+              <span
+                v-if="chat.unread_count > 0 && selectedChat?.id !== chat.id && chat?.assigned_agent_id === auth_user.id"
+                class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping"
+              ></span>
             </div>
 
+            <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat: {{chat?.customer_name }}
+                  Chat: {{ chat?.customer_name }}
                 </span>
                 <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
                   Chat # {{ chat.id }}
                 </span>
-                <span v-if="chat.unread_count > 0"
+                <span
+                  v-if="chat.unread_count > 0"
                   class="inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 leading-none"
-                  style="min-width: 20px; height: 18px;">
+                  style="min-width: 20px; height: 18px;"
+                >
                   {{ chat.unread_count }}
                 </span>
                 <span
@@ -1812,28 +1881,31 @@ const filteredUnassignChatsByCompany = computed(() => {
                   {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
+
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
                 {{ getUserInfo(chat?.latest_message?.message) }}
               </p>
               <p class="text-xs text-slate-500 truncate mb-1" v-else>
                 {{ chat?.latest_message?.message || 'No messages' }}
               </p>
+
               <p v-if="chat.current_url" class="text-xs text-slate-400 truncate flex items-center gap-1">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" class="flex-shrink-0">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" />
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                 </svg>
                 {{ chat.current_url }}
               </p>
             </div>
 
+            <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
-              <button @click="deleteChat(chat, $event)" title="Delete Chat"
-                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round">
+              <button
+                @click.stop="deleteChat(chat, $event)"
+                title="Delete Chat"
+                class="w-6 h-6 rounded-md flex items-center justify-center bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-colors duration-150"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6l-1 14H6L5 6" />
                   <path d="M10 11v6M14 11v6" />
@@ -1842,9 +1914,44 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-        </div> -
+        </div>
       </aside>
     </div>
 
+    <!-- Transfer Chat Modal -->
+    <Modal :show="showTransferModal" @close="closeTransferModal" max-width="max-w-md">
+      <div class="p-6">
+        <h2 class="text-lg font-medium text-gray-900 mb-4">Transfer Chat</h2>
+
+        <div class="mb-4">
+          <p class="text-sm text-slate-600 mb-2">Select user to transfer chat to:</p>
+          <select
+            v-model="selectedTransferUser"
+            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            :disabled="transferUsersLoading || transferLoading"
+          >
+            <option :value="null" disabled>
+              {{ transferUsersLoading ? 'Loading users...' : 'Select a user...' }}
+            </option>
+            <option v-for="user in transferUsers" :key="user.id" :value="user">
+              {{ user.name }} ({{ user.email }})
+            </option>
+          </select>
+          <p v-if="transferUsersError" class="mt-2 text-sm text-red-600">{{ transferUsersError }}</p>
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <SecondaryButton type="button" @click="closeTransferModal">Cancel</SecondaryButton>
+          <PrimaryButton
+            type="button"
+            @click="transferChat"
+            :class="{ 'opacity-50 cursor-not-allowed': !selectedTransferUser || transferLoading }"
+            :disabled="!selectedTransferUser || transferLoading"
+          >
+            {{ transferLoading ? 'Transferring...' : 'Transfer' }}
+          </PrimaryButton>
+        </div>
+      </div>
+    </Modal>
   </AuthenticatedLayout>
 </template>

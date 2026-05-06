@@ -113,7 +113,10 @@
     </div>
     <div class="composer">
         <button class="attach-btn" id="attachBtn" type="button" title="Attach file"><i data-v-bff3308f="" class="fa fa-paperclip"></i></button>
-        <input class="input" id="text" placeholder="Type a message…" autocomplete="off">
+       
+        <textarea class="input" id="text" placeholder="Type a message…" rows="1"
+  style="resize: none; overflow: hidden;"></textarea>
+
         <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
         <button class="send" id="sendBtn" type="button" disabled>Send</button>
         <button class="btn btn-success btn-sm mt-2 new-chat" id="newChatBtn" type="button" style="display: none;">New Chat</button>
