@@ -775,13 +775,14 @@ const removeRegistration = (index) => {
             :disabled="showPrechatForm || chatClosed" /> -->
 
            <textarea v-model="message"
-  @input="autoResize"
-  ref="textareaRef"
-  placeholder="Type a message..."
-  class="form-control rounded-5"
-  rows="1"
-  style="overflow:hidden; resize:none;"
-  :disabled="showPrechatForm || chatClosed"></textarea>
+              @input="autoResize"
+              ref="textareaRef"
+              placeholder="Type a message..."
+              class="form-control rounded-5"
+              rows="1"
+              style="overflow:hidden; resize:none;"
+              :disabled="showPrechatForm || chatClosed">
+          </textarea>
 
           <button type="submit"
             class="btn btn-primary btn-sm rounded-5 px-3"
