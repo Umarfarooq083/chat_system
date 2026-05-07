@@ -11,7 +11,6 @@ import InputError from '@/Components/InputError.vue'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
 import { beep, setupAudioUnlock } from '../../utils/beep'
 
-// Props from backend
 const props = defineProps({
   chats: {
     type: Array,
@@ -237,7 +236,7 @@ onMounted(() => {
   fetchAgentLoad()
   agentLoadIntervalId = setInterval(fetchAgentLoad, 30000)
   agentLoadPromptIntervalId = setInterval(() => {
-    openAgentLoadModal()
+    // openAgentLoadModal()
   }, 2000) // 2 minutes = 120000 ms
   slaNowIntervalId = setInterval(() => {
     slaNowMs.value = Date.now()
@@ -740,22 +739,10 @@ onMounted(() => {
   chats.value.forEach(chat => subscribeToChat(chat.id))
 })
 
-onMounted(() => {
-  // pollForChats()
-  // pollIntervalId = setInterval(pollForChats, 5000)
-})
 
 const filteredOpenChats = computed(() => {
   return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
 });
-
-// const activeChatCount = computed(() => {
-//   return chats.value.filter(chat =>
-//     chat?.assigned_agent_id === props.auth_user?.id &&
-//     chat?.status === 'open' &&
-//     chat?.is_online === true
-//   ).length
-// })
 
 const showAgentLoadModal = ref(false)
 const agentLoadRows = ref([])
@@ -775,13 +762,18 @@ const fetchAgentLoad = async () => {
 }
 
 const openAgentLoadModal = async () => {
+  showAgentLoadPreview.value = false
   showAgentLoadModal.value = true
   await fetchAgentLoad()
 }
 
-const closeAgentLoadModal = () => {
-  showAgentLoadModal.value = false
+const refreshAgentLoadOnHover = async () => {
+  await fetchAgentLoad()
 }
+
+// const closeAgentLoadModal = () => {
+//   showAgentLoadModal.value = false
+// }
 
 const agentLoadSorted = computed(() => {
   return [...(agentLoadRows.value || [])].sort((a, b) => {
@@ -790,6 +782,8 @@ const agentLoadSorted = computed(() => {
     return (b?.open_chats ?? 0) - (a?.open_chats ?? 0)
   })
 })
+
+const showAgentLoadPreview = ref(false)
 
 const filteredClosedChats = computed(() => {
   return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'close');
@@ -944,19 +938,6 @@ const filteredUnassignChatsByCompany = computed(() => {
           <h2 class="text-base font-bold text-gray-900 tracking-tight">Agent Dashboard</h2>
         </div>
         <div class="flex items-center gap-3">
-          <!-- <div
-            class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700"
-            title="Chats assigned to you where visitor is online"
-          >
-            Active: <span class="font-bold tabular-nums">{{ activeChatCount }}</span>
-          </div> -->
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
-            @click="openAgentLoadModal"
-          >
-            Agent Load
-          </button>
           <button
             type="button"
             class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
@@ -973,66 +954,57 @@ const filteredUnassignChatsByCompany = computed(() => {
       </div>
     </template>
 
-    <!-- Agent Load Modal -->
-    <Modal :show="showAgentLoadModal" @close="closeAgentLoadModal"  >
-      <div class="p-6 mx-auto">
-        <div class="flex items-center justify-between gap-4 mb-4">
-          <div class="flex items-center gap-2">
-            <span class="text-lg"></span>
-            <h2 class="text-lg font-bold">Agent Load</h2>
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="text-xs font-semibold  hover:underline"
-              @click="fetchAgentLoad"
-            >
-               Refresh
-            </button>
-            <button
-              type="button"
-              class="  text-lg"
-              @click="closeAgentLoadModal"
-            >
-              ✕
-            </button>
+    <!-- Agent Load Mini Cart - Fixed Top Left -->
+    <div 
+      class="fixed top-4 right-4 z-50"
+      @mouseenter="showAgentLoadPreview = true; refreshAgentLoadOnHover()"
+      @mouseleave="showAgentLoadPreview = false"
+    >
+      <div
+        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors shadow-md"
+        title="Agent Load - Total active chats across all agents"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-600">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+        <span class="text-sm font-bold text-amber-700 tabular-nums">{{ totalAgentActiveChats }}</span>
+      </div>
+
+      <!-- Mini Preview Dropdown -->
+      <div 
+        v-if="showAgentLoadPreview && agentLoadSorted.length"
+        class="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden"
+      >
+        <div class="px-3 py-2 bg-amber-50 border-b border-amber-100">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-amber-800 uppercase tracking-wider">Agent Load</div>
+            <div class="text-xs text-amber-600">{{ totalAgentActiveChats }} total</div>
           </div>
         </div>
-
-        <p class="text-xs  mb-4 font-medium">
-          Active chats where visitor is online (last activity within ~5 minutes).
-        </p>
-
-        <div v-if="agentLoadError" class="mb-3 text-sm text-red-800 bg-red-50 border border-red-300 rounded-lg px-3 py-2 shadow-sm">
-          {{ agentLoadError }}
+        <div class="max-h-80 overflow-y-auto">
+          <div 
+            v-for="agent in agentLoadSorted.slice(0, 8)" 
+            :key="agent.id"
+            class="px-3 py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-semibold text-slate-800 truncate">{{ agent.name }}</div>
+                <div class="text-[11px] text-slate-500 truncate">{{ agent.email }}</div>
+              </div>
+              <div class="flex items-center gap-2 ml-2">
+                <div class="text-xs font-bold text-slate-700">{{ agent.active_chats }}</div>
+                <div class="w-2 h-2 rounded-full" :class="agent.active_chats > 0 ? 'bg-amber-500' : 'bg-slate-300'"></div>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <div class="overflow-x-auto border  rounded-xl shadow-inner">
-          <table class="min-w-full text-sm">
-            <thead class=" ">
-              <tr>
-                <th class="text-left font-semibold px-4 py-2.5">Agent</th>
-                <th class="text-right font-semibold px-4 py-2.5">Active</th>
-                <!-- <th class="text-right font-semibold px-4 py-2.5">Open</th> -->
-              </tr>
-            </thead>
-            <tbody class="divide-y ">
-              <tr v-for="row in agentLoadSorted" :key="row.id" class="hover:bg-blue-50">
-                <td class="px-4 py-2.5">
-                  <div class="font-semibold ">{{ row.name }}</div>
-                  <div class="text-xs ">{{ row.email }}</div>
-                </td>
-                <td class="px-4 py-2.5 text-right font-bold tabular-nums text-yellow-900">{{ row.active_chats }}</td>
-                <!-- <td class="px-4 py-2.5 text-right tabular-nums text-slate-700">{{ row.open_chats }}</td> -->
-              </tr>
-              <tr v-if="!agentLoadSorted.length">
-                <td colspan="3" class="px-4 py-8 text-center text-yellow-700 font-medium">No agents found.</td>
-              </tr>
-            </tbody>
-          </table>
+        
         </div>
       </div>
-    </Modal>
 
     <!-- CNIC Modal -->
     <Modal :show="cnicModalOpen" @close="closeCnicModal">
@@ -1132,8 +1104,6 @@ const filteredUnassignChatsByCompany = computed(() => {
 
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
       style="height: calc(100vh - 85px);">
-
-      <!-- ═══════════════════ LEFT SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-r border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
 

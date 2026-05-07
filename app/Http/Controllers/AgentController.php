@@ -192,7 +192,7 @@ class AgentController extends Controller
                 // 'open_chats' => (int) ($openCounts[$agent->id] ?? 0),
                 'active_chats' => (int) ($activeCounts[$agent->id] ?? 0),
             ];
-        })->values();
+        })->sortByDesc('active_chats')->values();
 
         return response()->json([
             'cursor' => now()->toIso8601String(),
