@@ -11,7 +11,6 @@ import InputError from '@/Components/InputError.vue'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
 import { beep, setupAudioUnlock } from '../../utils/beep'
 
-// Props from backend
 const props = defineProps({
   chats: {
     type: Array,
@@ -51,6 +50,7 @@ let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 let slaNowIntervalId = null
+let agentLoadPromptIntervalId = null
 const SLA_FIRST_REPLY_SECONDS = 120
 const slaNowMs = ref(Date.now())
 
@@ -233,6 +233,11 @@ onMounted(() => {
   chats.value = props.chats || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
+  fetchAgentLoad()
+  agentLoadIntervalId = setInterval(fetchAgentLoad, 30000)
+  agentLoadPromptIntervalId = setInterval(() => {
+    // openAgentLoadModal()
+  }, 2000) // 2 minutes = 120000 ms
   slaNowIntervalId = setInterval(() => {
     slaNowMs.value = Date.now()
   }, 1000)
@@ -244,6 +249,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
   if (pollIntervalId) clearInterval(pollIntervalId)
+  if (agentLoadIntervalId) clearInterval(agentLoadIntervalId)
+  if (agentLoadPromptIntervalId) clearInterval(agentLoadPromptIntervalId)
   if (slaNowIntervalId) clearInterval(slaNowIntervalId)
   if (pasteListenerActive.value) {
     document.removeEventListener('paste', handlePaste)
@@ -732,14 +739,51 @@ onMounted(() => {
   chats.value.forEach(chat => subscribeToChat(chat.id))
 })
 
-onMounted(() => {
-  // pollForChats()
-  // pollIntervalId = setInterval(pollForChats, 5000)
-})
 
 const filteredOpenChats = computed(() => {
   return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
 });
+
+const showAgentLoadModal = ref(false)
+const agentLoadRows = ref([])
+const agentLoadCursor = ref(null)
+const agentLoadError = ref('')
+let agentLoadIntervalId = null
+
+const fetchAgentLoad = async () => {
+  try {
+    const res = await axios.get('/agent/agents/active-counts', { params: { cursor: agentLoadCursor.value } })
+    agentLoadRows.value = Array.isArray(res?.data?.agents) ? res.data.agents : []
+    agentLoadCursor.value = res?.data?.cursor ?? null
+    agentLoadError.value = ''
+  } catch (e) {
+    agentLoadError.value = extractErrorMessage(e, 'Failed to load agent stats.')
+  }
+}
+
+const openAgentLoadModal = async () => {
+  showAgentLoadPreview.value = false
+  showAgentLoadModal.value = true
+  await fetchAgentLoad()
+}
+
+const refreshAgentLoadOnHover = async () => {
+  await fetchAgentLoad()
+}
+
+// const closeAgentLoadModal = () => {
+//   showAgentLoadModal.value = false
+// }
+
+const agentLoadSorted = computed(() => {
+  return [...(agentLoadRows.value || [])].sort((a, b) => {
+    const byActive = (b?.active_chats ?? 0) - (a?.active_chats ?? 0)
+    if (byActive !== 0) return byActive
+    return (b?.open_chats ?? 0) - (a?.open_chats ?? 0)
+  })
+})
+
+const showAgentLoadPreview = ref(false)
 
 const filteredClosedChats = computed(() => {
   return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'close');
@@ -910,6 +954,58 @@ const filteredUnassignChatsByCompany = computed(() => {
       </div>
     </template>
 
+    <!-- Agent Load Mini Cart - Fixed Top Left -->
+    <div 
+      class="fixed top-4 right-4 z-50"
+      @mouseenter="showAgentLoadPreview = true; refreshAgentLoadOnHover()"
+      @mouseleave="showAgentLoadPreview = false"
+    >
+      <div
+        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors shadow-md"
+        title="Agent Load - Total active chats across all agents"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-600">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+        <span class="text-sm font-bold text-amber-700 tabular-nums">{{ totalAgentActiveChats }}</span>
+      </div>
+
+      <!-- Mini Preview Dropdown -->
+      <div 
+        v-if="showAgentLoadPreview && agentLoadSorted.length"
+        class="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden"
+      >
+        <div class="px-3 py-2 bg-amber-50 border-b border-amber-100">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-amber-800 uppercase tracking-wider">Agent Load</div>
+            <div class="text-xs text-amber-600">{{ totalAgentActiveChats }} total</div>
+          </div>
+        </div>
+        <div class="max-h-80 overflow-y-auto">
+          <div 
+            v-for="agent in agentLoadSorted.slice(0, 8)" 
+            :key="agent.id"
+            class="px-3 py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-semibold text-slate-800 truncate">{{ agent.name }}</div>
+                <div class="text-[11px] text-slate-500 truncate">{{ agent.email }}</div>
+              </div>
+              <div class="flex items-center gap-2 ml-2">
+                <div class="text-xs font-bold text-slate-700">{{ agent.active_chats }}</div>
+                <div class="w-2 h-2 rounded-full" :class="agent.active_chats > 0 ? 'bg-amber-500' : 'bg-slate-300'"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        </div>
+      </div>
+
     <!-- CNIC Modal -->
     <Modal :show="cnicModalOpen" @close="closeCnicModal">
       <div class="p-6">
@@ -1008,8 +1104,6 @@ const filteredUnassignChatsByCompany = computed(() => {
 
     <div class="flex bg-slate-50 rounded-xl overflow-hidden border border-slate-200 shadow-lg m-4"
       style="height: calc(100vh - 85px);">
-
-      <!-- ═══════════════════ LEFT SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-r border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
 
@@ -1134,14 +1228,14 @@ const filteredUnassignChatsByCompany = computed(() => {
         </div>
 
         <!-- Previous chats header -->
-        <div class="px-4 py-4 border-b border-slate-100">
+        <!-- <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Previous chats</div>
           </div>
-        </div>
+        </div> -->
 
         <!-- Closed chats list -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+        <!-- <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div
             v-for="chat in filteredClosedChats"
             :key="chat.id"
@@ -1155,7 +1249,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                   : 'hover:bg-slate-50'
             ]"
           >
-            <!-- Avatar -->
+          
             <div class="relative flex-shrink-0">
               <div
                 :class="[
@@ -1183,7 +1277,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               ></span>
             </div>
 
-            <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
@@ -1226,7 +1319,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               </p>
             </div>
 
-            <!-- Action buttons (Delete only for closed) -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
               <button
                 @click.stop="deleteChat(chat, $event)"
@@ -1242,13 +1334,13 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-        </div>
+        </div> -->
+        
       </aside>
 
-      <!-- ═══════════════════ MAIN PANEL ═══════════════════ -->
       <main class="flex-1 flex flex-col bg-slate-50 overflow-hidden">
         <template v-if="selectedChat">
-          <!-- Chat Header -->
+         
           <div class="flex items-center gap-3 px-5 py-3.5 bg-white border-b border-slate-200 shadow-sm">
             <div
               class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold font-mono flex-shrink-0"
@@ -1317,7 +1409,6 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
           </div>
 
-          <!-- Chat Feedback Panel -->
           <div v-if="showFeedbackPanel" class="bg-white border-b border-slate-200">
             <div class="px-5 py-2 flex items-center justify-between"></div>
 
@@ -1396,18 +1487,15 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
           </div>
 
-          <!-- Messages scroll area -->
           <div class="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-3">
             <div v-for="msg in messages" :key="msg.id" :class="['flex', msg.sender_type === 'agent' ? 'justify-end' : 'justify-start']">
 
-              <!-- Prechat info request -->
               <div v-if="msg.message_type === 'prechat_info_request'" class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
                   Visitor Details Form Requested
                 </div>
               </div>
 
-              <!-- Prechat info response -->
               <div v-else-if="msg.message_type === 'prechat_info_response'" class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-cyan-800 mb-1.5 flex items-center gap-1.5">
                   Visitor Details Received:
@@ -1418,14 +1506,12 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </div>
               </div>
 
-              <!-- User info request -->
               <div v-else-if="msg.message_type === 'user_info_request'" class="max-w-sm bg-blue-50 border border-blue-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-blue-700 mb-1.5 flex items-center gap-1.5">
                   <span>📋</span> User Information Form Request Sent
                 </div>
               </div>
 
-              <!-- User info response -->
               <div v-else-if="msg.message_type === 'user_info_response'" class="max-w-sm bg-emerald-50 border border-emerald-200 rounded-xl p-3">
                 <div class="text-xs font-bold text-emerald-700 mb-1.5 flex items-center gap-1.5">
                   User Information Received:
@@ -1466,7 +1552,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </div>
               </div>
 
-              <!-- External HTML / PDF sent message -->
               <div v-else-if="msg.message_type === 'external_data_html'" class="max-w-xl bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
                 <div class="text-xs font-bold text-slate-700 mb-2">PDF Sent</div>
                 <div v-if="attachmentViewUrl(msg)" class="mt-2">
@@ -1506,7 +1591,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </div>
               </div>
 
-              <!-- Regular message with optional attachment -->
               <div v-else class="flex flex-col gap-1.5" :class="msg.sender_type === 'agent' ? 'items-end' : 'items-start'">
                 <template v-if="msg.attachment_view_url">
                   <img
@@ -1547,7 +1631,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </div>
               </div>
 
-              <!-- Timestamp + read receipt -->
               <div
                 class="mt-1 text-[11px] text-slate-400 flex items-center gap-1"
                 :class="msg.sender_type === 'agent' ? 'justify-end pr-1' : 'justify-start pl-1'"
@@ -1560,7 +1643,6 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
           </div>
 
-          <!-- ── Reply bar ── -->
           <div
             class="bg-white border-t border-slate-200 transition-all duration-200"
             :class="isDraggingOver ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50' : ''"
@@ -1568,7 +1650,7 @@ const filteredUnassignChatsByCompany = computed(() => {
             @dragleave="onDragLeave"
             @drop="onDrop"
           >
-            <!-- Attachment previews -->
+            
             <div v-if="attachedFiles.length" class="flex flex-wrap gap-2 px-4 pt-3 pb-1">
               <div
                 v-for="(item, index) in attachedFiles"
@@ -1599,7 +1681,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               </div>
             </div>
 
-            <!-- Drag-over hint -->
             <div v-if="isDraggingOver" class="flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-indigo-600">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
@@ -1607,7 +1688,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               Drop files to attach
             </div>
 
-            <!-- Error message -->
             <div v-if="sendError" class="px-4 pb-2">
               <div class="border border-red-200 bg-red-50 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start justify-between gap-2">
                 <span class="whitespace-pre-line">{{ sendError }}</span>
@@ -1615,12 +1695,10 @@ const filteredUnassignChatsByCompany = computed(() => {
               </div>
             </div>
 
-            <!-- Input row -->
             <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="relative flex items-center gap-0 px-4 py-3">
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
 
-              <!-- Chat Closed Overlay -->
               <div
                 v-if="selectedChat?.status === 'close' && dismissedClosedChatId !== selectedChat.id"
                 class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-10"
@@ -1641,7 +1719,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </div>
               </div>
 
-              <!-- Attach button -->
               <button
                 type="button"
                 @click="triggerFileInput"
@@ -1663,7 +1740,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 >{{ attachedFiles.length }}</span>
               </button>
 
-              <!-- Textarea -->
               <textarea
                 v-model="replyMessage"
                 rows="1"
@@ -1675,7 +1751,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 ]"
               ></textarea>
 
-              <!-- Send button -->
               <button
                 type="submit"
                 :disabled="selectedChat?.status === 'close'"
@@ -1693,7 +1768,6 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
         </template>
 
-        <!-- Empty state -->
         <div v-else class="flex-1 flex flex-col items-center justify-center gap-4 text-slate-400 px-12">
           <div class="w-20 h-20 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
             <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1707,11 +1781,9 @@ const filteredUnassignChatsByCompany = computed(() => {
         </div>
       </main>
 
-      <!-- ═══════════════════ RIGHT SIDEBAR ═══════════════════ -->
       <aside class="flex flex-col bg-white border-l border-slate-200 overflow-hidden"
         style="width: 350px; min-width: 350px;">
 
-        <!-- Unassign chats header -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Unassign chats</div>
@@ -1722,7 +1794,6 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
         </div>
 
-        <!-- Unassign chats list -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div
             v-for="chat in filteredUnassignChatsByCompany"
@@ -1737,7 +1808,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                   : 'hover:bg-slate-50'
             ]"
           >
-            <!-- Avatar -->
+            
             <div class="relative flex-shrink-0">
               <div
                 class="w-10 h-10 rounded-xl flex items-center justify-center text-slate-500 text-xs font-bold font-mono"
@@ -1752,7 +1823,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               <span v-if="chat.unread_count > 0" class="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white animate-ping"></span>
             </div>
 
-            <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
@@ -1792,7 +1862,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               </p>
             </div>
 
-            <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
               <button
                 @click.stop="deleteChat(chat, $event)"
@@ -1810,15 +1879,13 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
         </div>
 
-        <!-- Other chats header -->
-        <div class="px-4 py-4 border-b border-slate-100">
+        <!-- <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Other chats</div>
           </div>
-        </div>
+        </div> -->
 
-        <!-- Other chats list -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-1">
+        <!-- <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div
             v-for="chat in filteredGlobalChats"
             :key="chat.id"
@@ -1832,7 +1899,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                   : 'hover:bg-slate-50'
             ]"
           >
-            <!-- Avatar -->
             <div class="relative flex-shrink-0">
               <div
                 :class="[
@@ -1858,7 +1924,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               ></span>
             </div>
 
-            <!-- Text Info -->
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
@@ -1898,7 +1963,6 @@ const filteredUnassignChatsByCompany = computed(() => {
               </p>
             </div>
 
-            <!-- Action buttons -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
               <button
                 @click.stop="deleteChat(chat, $event)"
@@ -1914,11 +1978,10 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-        </div>
+        </div> -->
       </aside>
     </div>
 
-    <!-- Transfer Chat Modal -->
     <Modal :show="showTransferModal" @close="closeTransferModal" max-width="max-w-md">
       <div class="p-6">
         <h2 class="text-lg font-medium text-gray-900 mb-4">Transfer Chat</h2>

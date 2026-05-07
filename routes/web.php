@@ -47,6 +47,9 @@ Route::get('/chat-widget', [ChatWidgetController::class, 'page'])->name('chat-wi
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats', [AgentController::class, 'index'])->name('agent.chats');
+    Route::get('/agent/chats/history', [AgentController::class, 'history'])->name('agent.chats.history');
+    Route::get('/agent/chats/history/{chat}', [AgentController::class, 'historyShow'])->name('agent.chats.history.show');
+    Route::get('/agent/chats/history/{chat}/messages', [AgentController::class, 'historyMessages'])->name('agent.chats.history.messages');
     Route::get('/agent/reports', [AgentController::class, 'reports'])->name('agent.reports');
     Route::get('/agent/sla-report', [AgentController::class, 'slaReport'])->name('agent.sla-report');
     Route::get('/agent/reports/export', [AgentController::class, 'exportReports'])->name('agent.reports.export');
@@ -64,6 +67,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agent/chats/{chat}/external/send-html', [AgentController::class, 'sendExternalHtml'])->name('agent.chat.external.sendHtml');
     Route::post('/agent/chats/{chat}/external/send-pdf', [AgentController::class, 'sendExternalPdf'])->name('agent.chat.external.sendPdf');
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
+    Route::get('/agent/agents/active-counts', [AgentController::class, 'agentActiveChatCounts'])->name('agent.agents.activeCounts');
 
     // Company CRUD routes
     Route::resource('companies', CompanyController::class);
