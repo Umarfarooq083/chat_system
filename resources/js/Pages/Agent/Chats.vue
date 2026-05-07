@@ -51,6 +51,7 @@ let onlineFlagsIntervalId = null
 let pollIntervalId = null
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 let slaNowIntervalId = null
+let agentLoadPromptIntervalId = null
 const SLA_FIRST_REPLY_SECONDS = 120
 const slaNowMs = ref(Date.now())
 
@@ -235,6 +236,9 @@ onMounted(() => {
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
   fetchAgentLoad()
   agentLoadIntervalId = setInterval(fetchAgentLoad, 30000)
+  agentLoadPromptIntervalId = setInterval(() => {
+    openAgentLoadModal()
+  }, 2000) // 2 minutes = 120000 ms
   slaNowIntervalId = setInterval(() => {
     slaNowMs.value = Date.now()
   }, 1000)
@@ -247,6 +251,7 @@ onBeforeUnmount(() => {
   if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
   if (pollIntervalId) clearInterval(pollIntervalId)
   if (agentLoadIntervalId) clearInterval(agentLoadIntervalId)
+  if (agentLoadPromptIntervalId) clearInterval(agentLoadPromptIntervalId)
   if (slaNowIntervalId) clearInterval(slaNowIntervalId)
   if (pasteListenerActive.value) {
     document.removeEventListener('paste', handlePaste)
@@ -970,46 +975,58 @@ const filteredUnassignChatsByCompany = computed(() => {
 
     <!-- Agent Load Modal -->
     <Modal :show="showAgentLoadModal" @close="closeAgentLoadModal"  >
-      <div class="p-6">
+      <div class="p-6 mx-auto">
         <div class="flex items-center justify-between gap-4 mb-4">
-          <h2 class="text-lg font-medium text-gray-900">Agent Load</h2>
-          <button
-            type="button"
-            class="text-xs font-semibold text-indigo-700 hover:underline"
-            @click="fetchAgentLoad"
-          >
-            Refresh
-          </button>
+          <div class="flex items-center gap-2">
+            <span class="text-lg"></span>
+            <h2 class="text-lg font-bold">Agent Load</h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="text-xs font-semibold  hover:underline"
+              @click="fetchAgentLoad"
+            >
+               Refresh
+            </button>
+            <button
+              type="button"
+              class="  text-lg"
+              @click="closeAgentLoadModal"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
-        <p class="text-xs text-slate-500 mb-4">
+        <p class="text-xs  mb-4 font-medium">
           Active chats where visitor is online (last activity within ~5 minutes).
         </p>
 
-        <div v-if="agentLoadError" class="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div v-if="agentLoadError" class="mb-3 text-sm text-red-800 bg-red-50 border border-red-300 rounded-lg px-3 py-2 shadow-sm">
           {{ agentLoadError }}
         </div>
 
-        <div class="overflow-x-auto border border-slate-200 rounded-xl bg-white">
+        <div class="overflow-x-auto border  rounded-xl shadow-inner">
           <table class="min-w-full text-sm">
-            <thead class="bg-slate-50 text-slate-600">
+            <thead class=" ">
               <tr>
                 <th class="text-left font-semibold px-4 py-2.5">Agent</th>
                 <th class="text-right font-semibold px-4 py-2.5">Active</th>
                 <!-- <th class="text-right font-semibold px-4 py-2.5">Open</th> -->
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100">
-              <tr v-for="row in agentLoadSorted" :key="row.id" class="hover:bg-slate-50">
+            <tbody class="divide-y ">
+              <tr v-for="row in agentLoadSorted" :key="row.id" class="hover:bg-blue-50">
                 <td class="px-4 py-2.5">
-                  <div class="font-semibold text-slate-800">{{ row.name }}</div>
-                  <div class="text-xs text-slate-500">{{ row.email }}</div>
+                  <div class="font-semibold ">{{ row.name }}</div>
+                  <div class="text-xs ">{{ row.email }}</div>
                 </td>
-                <td class="px-4 py-2.5 text-right font-bold tabular-nums text-indigo-700">{{ row.active_chats }}</td>
+                <td class="px-4 py-2.5 text-right font-bold tabular-nums text-yellow-900">{{ row.active_chats }}</td>
                 <!-- <td class="px-4 py-2.5 text-right tabular-nums text-slate-700">{{ row.open_chats }}</td> -->
               </tr>
               <tr v-if="!agentLoadSorted.length">
-                <td colspan="3" class="px-4 py-8 text-center text-slate-500">No agents found.</td>
+                <td colspan="3" class="px-4 py-8 text-center text-yellow-700 font-medium">No agents found.</td>
               </tr>
             </tbody>
           </table>
