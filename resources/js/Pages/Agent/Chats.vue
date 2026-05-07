@@ -233,6 +233,8 @@ onMounted(() => {
   chats.value = props.chats || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
+  fetchAgentLoad()
+  agentLoadIntervalId = setInterval(fetchAgentLoad, 30000)
   slaNowIntervalId = setInterval(() => {
     slaNowMs.value = Date.now()
   }, 1000)
@@ -244,6 +246,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (onlineFlagsIntervalId) clearInterval(onlineFlagsIntervalId)
   if (pollIntervalId) clearInterval(pollIntervalId)
+  if (agentLoadIntervalId) clearInterval(agentLoadIntervalId)
   if (slaNowIntervalId) clearInterval(slaNowIntervalId)
   if (pasteListenerActive.value) {
     document.removeEventListener('paste', handlePaste)
@@ -741,6 +744,48 @@ const filteredOpenChats = computed(() => {
   return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
 });
 
+// const activeChatCount = computed(() => {
+//   return chats.value.filter(chat =>
+//     chat?.assigned_agent_id === props.auth_user?.id &&
+//     chat?.status === 'open' &&
+//     chat?.is_online === true
+//   ).length
+// })
+
+const showAgentLoadModal = ref(false)
+const agentLoadRows = ref([])
+const agentLoadCursor = ref(null)
+const agentLoadError = ref('')
+let agentLoadIntervalId = null
+
+const fetchAgentLoad = async () => {
+  try {
+    const res = await axios.get('/agent/agents/active-counts', { params: { cursor: agentLoadCursor.value } })
+    agentLoadRows.value = Array.isArray(res?.data?.agents) ? res.data.agents : []
+    agentLoadCursor.value = res?.data?.cursor ?? null
+    agentLoadError.value = ''
+  } catch (e) {
+    agentLoadError.value = extractErrorMessage(e, 'Failed to load agent stats.')
+  }
+}
+
+const openAgentLoadModal = async () => {
+  showAgentLoadModal.value = true
+  await fetchAgentLoad()
+}
+
+const closeAgentLoadModal = () => {
+  showAgentLoadModal.value = false
+}
+
+const agentLoadSorted = computed(() => {
+  return [...(agentLoadRows.value || [])].sort((a, b) => {
+    const byActive = (b?.active_chats ?? 0) - (a?.active_chats ?? 0)
+    if (byActive !== 0) return byActive
+    return (b?.open_chats ?? 0) - (a?.open_chats ?? 0)
+  })
+})
+
 const filteredClosedChats = computed(() => {
   return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'close');
 });
@@ -894,6 +939,19 @@ const filteredUnassignChatsByCompany = computed(() => {
           <h2 class="text-base font-bold text-gray-900 tracking-tight">Agent Dashboard</h2>
         </div>
         <div class="flex items-center gap-3">
+          <!-- <div
+            class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700"
+            title="Chats assigned to you where visitor is online"
+          >
+            Active: <span class="font-bold tabular-nums">{{ activeChatCount }}</span>
+          </div> -->
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+            @click="openAgentLoadModal"
+          >
+            Agent Load
+          </button>
           <button
             type="button"
             class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
@@ -909,6 +967,55 @@ const filteredUnassignChatsByCompany = computed(() => {
         </div>
       </div>
     </template>
+
+    <!-- Agent Load Modal -->
+    <Modal :show="showAgentLoadModal" @close="closeAgentLoadModal"  >
+      <div class="p-6">
+        <div class="flex items-center justify-between gap-4 mb-4">
+          <h2 class="text-lg font-medium text-gray-900">Agent Load</h2>
+          <button
+            type="button"
+            class="text-xs font-semibold text-indigo-700 hover:underline"
+            @click="fetchAgentLoad"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-500 mb-4">
+          Active chats where visitor is online (last activity within ~5 minutes).
+        </p>
+
+        <div v-if="agentLoadError" class="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {{ agentLoadError }}
+        </div>
+
+        <div class="overflow-x-auto border border-slate-200 rounded-xl bg-white">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 text-slate-600">
+              <tr>
+                <th class="text-left font-semibold px-4 py-2.5">Agent</th>
+                <th class="text-right font-semibold px-4 py-2.5">Active</th>
+                <!-- <th class="text-right font-semibold px-4 py-2.5">Open</th> -->
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="row in agentLoadSorted" :key="row.id" class="hover:bg-slate-50">
+                <td class="px-4 py-2.5">
+                  <div class="font-semibold text-slate-800">{{ row.name }}</div>
+                  <div class="text-xs text-slate-500">{{ row.email }}</div>
+                </td>
+                <td class="px-4 py-2.5 text-right font-bold tabular-nums text-indigo-700">{{ row.active_chats }}</td>
+                <!-- <td class="px-4 py-2.5 text-right tabular-nums text-slate-700">{{ row.open_chats }}</td> -->
+              </tr>
+              <tr v-if="!agentLoadSorted.length">
+                <td colspan="3" class="px-4 py-8 text-center text-slate-500">No agents found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Modal>
 
     <!-- CNIC Modal -->
     <Modal :show="cnicModalOpen" @close="closeCnicModal">

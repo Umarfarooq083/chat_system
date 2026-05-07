@@ -62,13 +62,36 @@ const latestSnippet = (chat) => {
 
 const messageText = (msg) => {
   const value = msg?.message
+
   if (value == null) return ''
-  if (typeof value === 'string') return value
-  try {
+
+  if (typeof value === 'object') {
     return JSON.stringify(value)
-  } catch {
-    return String(value)
   }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+
+      return `
+        <div>
+          <div>
+            <span class="font-semibold text-gray-700">User Name:</span>
+            <span class="text-gray-900">${parsed.name}</span>
+          </div>
+
+          <div>
+            <span class="font-semibold text-gray-700">Phone:</span>
+            <span class="text-gray-900">${parsed.phone}</span>
+          </div>
+        </div>
+      `
+    } catch {
+      return value
+    }
+  }
+
+  return String(value)
 }
 
 const isMine = (msg) => msg?.sender_type === 'agent'
@@ -307,7 +330,7 @@ onMounted(() => {
                   :class="isMine(msg) ? 'items-end' : 'items-start'"
                 >
                   <div class="max-w-[80%] px-4 py-2.5 text-sm leading-relaxed break-words" :class="bubbleClass(msg)">
-                    {{ messageText(msg) }}
+                    <div v-html="messageText(msg)"></div>
                   </div>
                   <div class="mt-1 text-[11px] text-slate-400" :class="isMine(msg) ? 'pr-1' : 'pl-1'">
                     {{ formatDateTime(msg.created_at) }}

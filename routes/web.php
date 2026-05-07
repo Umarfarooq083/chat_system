@@ -67,6 +67,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agent/chats/{chat}/external/send-html', [AgentController::class, 'sendExternalHtml'])->name('agent.chat.external.sendHtml');
     Route::post('/agent/chats/{chat}/external/send-pdf', [AgentController::class, 'sendExternalPdf'])->name('agent.chat.external.sendPdf');
     Route::delete('/agent/chats/{chat}', [AgentController::class, 'destroy'])->name('agent.chat.destroy');
+    Route::get('/agent/agents/active-counts', [AgentController::class, 'agentActiveChatCounts'])->name('agent.agents.activeCounts');
 
     // Company CRUD routes
     Route::resource('companies', CompanyController::class);

@@ -18,6 +18,7 @@ use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use App\Models\User;
 
 class AgentController extends Controller
 {
@@ -134,6 +135,68 @@ class AgentController extends Controller
             'auth_user' => auth()->user(),
             'loginUserCompniesList' => $CompanyUUID,
             'pollCursor' => now()->toIso8601String(),
+        ]);
+    }
+
+    public function agentActiveChatCounts(Request $request)
+    {
+        $companyUuids = $this->allowedCompanyUuids();
+        if ($companyUuids->isEmpty()) {
+            return response()->json([
+                'cursor' => now()->toIso8601String(),
+                'agents' => [],
+            ]);
+        }
+
+        $companyIds = Company::query()
+            ->whereIn('uuid', $companyUuids->toArray())
+            ->pluck('id');
+
+        $agentIds = DB::table('company_user')
+            ->whereIn('company_id', $companyIds->toArray())
+            ->pluck('user_id')
+            ->unique()
+            ->values();
+
+        $agents = User::query()
+            ->whereIn('id', $agentIds->toArray())
+            ->select('id', 'name', 'email')
+            ->orderBy('name')
+            ->get();
+
+        // $activeCutoff = now()->subSeconds(60);
+        $activeCutoff = now()->subMinutes(5);
+        // dd($activeCutoff);
+        // $openCounts = Chat::query()
+        //     ->whereNotNull('assigned_agent_id')
+        //     ->where('status', 'open')
+        //     ->whereIn('company_id', $companyUuids->toArray())
+        //     ->groupBy('assigned_agent_id')
+        //     ->select('assigned_agent_id', DB::raw('COUNT(*) as total_open'))
+        //     ->pluck('total_open', 'assigned_agent_id');
+
+        $activeCounts = Chat::query()
+            ->whereNotNull('assigned_agent_id')
+            ->where('status', 'open')
+            ->where('last_activity', '>', $activeCutoff)
+            ->whereIn('company_id', $companyUuids->toArray())
+            ->groupBy('assigned_agent_id')
+            ->select('assigned_agent_id', DB::raw('COUNT(*) as active_open'))
+            ->pluck('active_open', 'assigned_agent_id');
+// $payload = $agents->map(function ($agent) use ($openCounts, $activeCounts) {
+        $payload = $agents->map(function ($agent) use ($activeCounts) {
+            return [
+                'id' => $agent->id,
+                'name' => $agent->name,
+                'email' => $agent->email,
+                // 'open_chats' => (int) ($openCounts[$agent->id] ?? 0),
+                'active_chats' => (int) ($activeCounts[$agent->id] ?? 0),
+            ];
+        })->values();
+
+        return response()->json([
+            'cursor' => now()->toIso8601String(),
+            'agents' => $payload,
         ]);
     }
 
