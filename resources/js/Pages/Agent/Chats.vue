@@ -1161,7 +1161,8 @@ const filteredUnassignChatsByCompany = computed(() => {
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat: {{ chat?.customer_name }}
+                  <!-- Chat: {{ chat?.customer_name }} -->
+                  Chat: {{ chat?.agent?.name }}
                 </span>
                 <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
                   Chat # {{ chat.id }}
@@ -1348,8 +1349,8 @@ const filteredUnassignChatsByCompany = computed(() => {
             >
               #{{ selectedChat.id }}
             </div>
-            <div class="flex-1 min-w-0">
-              <div class="font-bold text-gray-900 text-sm tracking-tight">Chat #{{ selectedChat.id }}</div>
+            <div class="flex-1 min-w-0"> 
+              <div class="font-bold text-gray-900 text-sm tracking-tight">Chat #{{ selectedChat.id }} | {{ selectedChat?.customer_name }}</div>
               <div class="flex items-center gap-3 mt-0.5 flex-wrap">
                 <a
                   v-if="selectedChat.current_url"

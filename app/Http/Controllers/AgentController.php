@@ -921,6 +921,7 @@ class AgentController extends Controller
                 ->join('users as agents', 'chats.assigned_agent_id', '=', 'agents.id')
                 ->join('companies', 'chats.company_id', '=', 'companies.uuid')
                 ->leftJoin('messages', 'messages.chat_id', '=', 'chats.id')
+                ->leftJoin('chat_feedbacks', 'chat_feedbacks.chat_id', '=', 'chats.id')
                 ->when($selectedCompany, function ($query) use ($selectedCompany) {
                     $query->where('companies.uuid', $selectedCompany);
                 })
@@ -940,12 +941,46 @@ class AgentController extends Controller
                         WHEN messages.sender_type = 'visitor' 
                         THEN chats.id 
                     END) as user_replied_users
+                "),
+                DB::raw("
+                COUNT(DISTINCT CASE 
+                        WHEN messages.attachments IS NOT NULL 
+                            AND messages.attachments != ''
+                        THEN messages.id 
+                    END) as attachments_count
+                "),
+                DB::raw("
+                    COUNT(DISTINCT CASE 
+                        WHEN chats.status = 'open' 
+                        THEN chats.id 
+                    END) as open_chats_count
+                "),
+
+                DB::raw("
+                    COUNT(DISTINCT CASE 
+                        WHEN chats.status = 'close' 
+                        THEN chats.id 
+                    END) as close_chats_count
+                "),
+                DB::raw("
+                    COUNT(DISTINCT CASE 
+                        WHEN chats.status = 'close'
+                            AND chat_feedbacks.chat_id IS NOT NULL
+                        THEN chats.id 
+                    END) as proper_complete_code
+                "),
+                DB::raw("
+                    COUNT(DISTINCT CASE 
+                        WHEN chats.status = 'close'
+                            AND chat_feedbacks.chat_id IS NULL
+                        THEN chats.id 
+                    END) as without_proper_code
                 ")
                 )
                 ->groupBy('chats.assigned_agent_id', 'agents.name')
                 ->get(),
         ];
-
+        // dd($stats['agent_concurrency']->toArray());
         return Inertia::render('Agent/Reports', [
             'stats' => $stats,
             'filters' => [

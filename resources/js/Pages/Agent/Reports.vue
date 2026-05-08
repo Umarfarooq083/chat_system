@@ -159,6 +159,9 @@ function resetFilters() {
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Agent</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Chats Start</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User Replies</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ledger Sent</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Closed Status</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-200">
@@ -172,6 +175,29 @@ function resetFilters() {
                                         <td class="px-4 py-3 text-sm">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                                 {{ concurrency?.user_replied_users }}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-sm">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                {{ concurrency?.attachments_count }}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-sm">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800" style="margin-bottom: 5px;">
+                                                Open: {{ concurrency?.open_chats_count }}
+                                            </span>
+                                            <br>
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-green-800">
+                                                Close: {{ concurrency?.close_chats_count }}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-sm">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800" style="margin-bottom: 5px;">
+                                                With Code: {{ concurrency?.proper_complete_code }}
+                                            </span>
+                                            <br>
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-green-800">
+                                                Without Code: {{ concurrency?.without_proper_code }}
                                             </span>
                                         </td>
                                     </tr>
