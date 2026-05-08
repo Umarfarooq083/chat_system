@@ -7,6 +7,7 @@ use App\Events\MessageSent;
 use App\Models\Chat;
 use App\Models\ChatExternalApiFetch;
 use App\Models\ChatFeedback;
+use App\Models\ChatTransferLog;
 use App\Models\Company;
 use App\Models\Message;
 use Carbon\Carbon;
@@ -645,6 +646,13 @@ class AgentController extends Controller
             'sender_type' => 'system',
             'message' => 'Chat transferred from Agent ID ' . $previousAgentId . ' to Agent ID ' . $targetAgentId . ' by ' . auth()->user()->name,
             'message_type' => 'system',
+        ]);
+
+        ChatTransferLog::create([
+            'chat_id' => $chat->id,
+            'assign_from_agent_id' => $previousAgentId,
+            'assign_to_agent_id' => $targetAgentId,
+            'assign_by_user_id' => auth()->id(),
         ]);
 
         $chat->load([

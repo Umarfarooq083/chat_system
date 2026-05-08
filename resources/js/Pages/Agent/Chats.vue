@@ -1199,6 +1199,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                   v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
                   :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
                 >
+                fff
                   {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
@@ -1389,21 +1390,6 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
 
             <div class="flex items-center gap-2 flex-shrink-0">
-
-              <div  class="flex items-center gap-2 mb-2">
-                <label class="text-sm font-medium text-gray-700 whitespace-nowrap">Quick Response:</label>
-                <select
-                  v-model="selectedPredefined"
-                  @change="onPredefinedSelect"
-                  class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                >
-                  <option value="">Select a quick response</option>
-                  <option v-for="resp in predefinedResponses" :key="resp.id" :value="resp.response">
-                    {{ resp.title }}
-                  </option>
-                </select>
-              </div>
-
               <button
                 @click="openFeedbackPanel(selectedChat)"
                 title="Feedback"
