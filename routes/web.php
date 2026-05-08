@@ -4,6 +4,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ChatWidgetController;
 use App\Http\Controllers\CompanyController;
+use App\Http\Controllers\PredefinedResponseController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
 use Illuminate\Foundation\Application;
@@ -59,6 +60,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats/{chat}/feedbacks', [AgentController::class, 'feedbacks'])->name('agent.chat.feedbacks');
     Route::post('/agent/chats/{chat}/feedbacks', [AgentController::class, 'storeFeedback'])->name('agent.chat.feedbacks.store');
     Route::post('/agent/chats/{chat}/read', [AgentController::class, 'markRead'])->name('agent.chat.read');
+    Route::post('/agent/chats/{chat}/reply', [AgentController::class, 'reply'])->name('agent.chat.reply');
     Route::post('/agent/chats/{chat}/close', [AgentController::class, 'close'])->name('agent.chat.close');
     Route::post('/agent/chats/{chat}/transfer', [AgentController::class, 'transfer'])->name('agent.chat.transfer');
     Route::get('/agent/transfer-users', [AgentController::class, 'transferUsers'])->name('agent.transfer.users');
@@ -74,6 +76,10 @@ Route::middleware(['auth'])->group(function () {
 
     // User CRUD routes
     Route::resource('users', UserController::class);
+
+    // Predefined Response CRUD routes
+    Route::resource('predefined-responses', PredefinedResponseController::class)->except(['show']);
+    Route::get('/predefined-responses/active', [PredefinedResponseController::class, 'active'])->name('predefined-responses.active');
 });
 
 Route::post('/visitor-chat/create', [ChatController::class, 'getOrCreateChat']);

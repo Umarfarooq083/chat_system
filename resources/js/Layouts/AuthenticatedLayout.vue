@@ -57,18 +57,24 @@ const showingNavigationDropdown = ref(false);
                                  >
                                      Reports
                                  </NavLink>
-                                 <NavLink
-                                     :href="route('agent.sla-report')"
-                                     :active="route().current('agent.sla-report')"
-                                 >
-                                     SLA Report
-                                 </NavLink>
-                                 <NavLink
-                                     :href="route('companies.index')"
-                                     :active="route().current('companies.index')"
-                                 >
-                                     Companies
-                                 </NavLink>
+                                  <NavLink
+                                      :href="route('agent.sla-report')"
+                                      :active="route().current('agent.sla-report')"
+                                  >
+                                      SLA Report
+                                  </NavLink>
+                                  <NavLink
+                                      :href="route('predefined-responses.index')"
+                                      :active="route().current('predefined-responses.index')"
+                                  >
+                                      Predefined Responses
+                                  </NavLink>
+                                  <NavLink
+                                      :href="route('companies.index')"
+                                      :active="route().current('companies.index')"
+                                  >
+                                      Companies
+                                  </NavLink>
                                 <NavLink
                                     :href="route('users.index')"
                                     :active="route().current('users.index')"
@@ -200,18 +206,24 @@ const showingNavigationDropdown = ref(false);
                          >
                              Reports
                          </ResponsiveNavLink>
-                         <ResponsiveNavLink
-                             :href="route('agent.sla-report')"
-                             :active="route().current('agent.sla-report')"
-                         >
-                             SLA Report
-                         </ResponsiveNavLink>
-                         <ResponsiveNavLink
-                             :href="route('companies.index')"
-                             :active="route().current('companies.index')"
-                         >
-                             Companies
-                         </ResponsiveNavLink>
+                          <ResponsiveNavLink
+                              :href="route('agent.sla-report')"
+                              :active="route().current('agent.sla-report')"
+                          >
+                              SLA Report
+                          </ResponsiveNavLink>
+                          <ResponsiveNavLink
+                              :href="route('predefined-responses.index')"
+                              :active="route().current('predefined-responses.index')"
+                          >
+                              Predefined Responses
+                          </ResponsiveNavLink>
+                          <ResponsiveNavLink
+                              :href="route('companies.index')"
+                              :active="route().current('companies.index')"
+                          >
+                              Companies
+                          </ResponsiveNavLink>
                         <ResponsiveNavLink
                             :href="route('users.index')"
                             :active="route().current('users.index')"

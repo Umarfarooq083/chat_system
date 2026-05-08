@@ -697,6 +697,34 @@ class AgentController extends Controller
         ]);
     }
 
+    public function reply(Request $request, Chat $chat)
+    {
+        $validated = $request->validate([
+            'message' => 'required|string',
+        ]);
+
+        $message = Message::create([
+            'chat_id' => $chat->id,
+            'sender_type' => 'agent',
+            'sender_id' => auth()->id(),
+            'message' => $validated['message'],
+            'message_type' => 'text',
+        ]);
+
+        $chat->last_message_at = $message->created_at;
+        $chat->agent_last_read_at = now();
+        if (! $chat->assigned_agent_id) {
+            $chat->assigned_agent_id = auth()->id();
+        }
+        $chat->save();
+
+        broadcast(new MessageSent($message));
+
+        return response()->json([
+            'message' => $message,
+        ]);
+    }
+
     public function fetchExternalData(Request $request, Chat $chat)
     {
         $this->assertCanActOnChat($chat);
