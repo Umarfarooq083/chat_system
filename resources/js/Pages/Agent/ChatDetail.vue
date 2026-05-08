@@ -24,8 +24,30 @@
         <span class="whitespace-pre-line">{{ sendError }}</span>
         <button type="button" class="font-bold leading-none" @click="sendError = ''">×</button>
       </div>
+
+      <!-- Predefined Response Dropdown -->
+      <div v-if="predefinedResponses.length > 0" class="flex items-center gap-2">
+        <label class="text-sm font-medium text-gray-700 whitespace-nowrap">Quick Reply:</label>
+        <select
+          v-model="selectedPredefined"
+          @change="onPredefinedSelect"
+          class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+        >
+          <option value="">Select a predefined response...</option>
+          <option v-for="resp in predefinedResponses" :key="resp.id" :value="resp.response">
+            {{ resp.title }}
+          </option>
+        </select>
+      </div>
+
       <div class="flex">
-        <input v-model="replyMessage" type="text" placeholder="Type your reply" class="flex-1 p-2 border rounded-l" :disabled="chat.status === 'close'">
+        <input 
+          v-model="replyMessage" 
+          type="text" 
+          placeholder="Type your reply or select from above" 
+          class="flex-1 p-2 border rounded-l" 
+          :disabled="chat.status === 'close'"
+        >
         <button type="submit" class="bg-blue-500 text-white px-4 rounded-r" :disabled="chat.status === 'close'">Send</button>
       </div>
     </form>
@@ -42,9 +64,29 @@ const props = usePage().props.value;
 const chat = props.chat;
 const messages = ref(props.messages || []);
 const replyMessage = ref('');
-const sendError = ref('')
+const sendError = ref('');
+const predefinedResponses = ref([]);
+const selectedPredefined = ref('');
 
 const chatId = chat.id;
+
+// Fetch active predefined responses
+const fetchPredefinedResponses = async () => {
+  try {
+    const response = await fetch('/predefined-responses/active');
+    const data = await response.json();
+    predefinedResponses.value = data.responses || [];
+  } catch (err) {
+    // Predefined responses are optional, ignore errors
+  }
+};
+
+// When a predefined response is selected, populate the input
+const onPredefinedSelect = () => {
+  if (selectedPredefined.value) {
+    replyMessage.value = selectedPredefined.value;
+  }
+};
 
 // Send reply
 const sendReply = () => {
@@ -55,6 +97,7 @@ const sendReply = () => {
     onSuccess: () => {
       sendError.value = ''
       replyMessage.value = ''
+      selectedPredefined.value = ''
     },
     onError: (errors) => {
       sendError.value = extractErrorMessage(errors, 'Failed to send. Please try again.')
@@ -65,6 +108,7 @@ const sendReply = () => {
 // Listen real-time from visitor
 onMounted(() => {
   setupAudioUnlock()
+  fetchPredefinedResponses();
   window.Echo.channel('chat.' + chatId)
     .listen('MessageSent', (e) => {
       messages.value.push(e.message);

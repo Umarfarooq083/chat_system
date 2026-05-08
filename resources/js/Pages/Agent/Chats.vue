@@ -86,6 +86,24 @@ const isPrechatPending = computed(() => {
   return true
 })
 
+const predefinedResponses = ref([])
+const selectedPredefined = ref("")
+
+const fetchPredefinedResponses = async () => {
+  try {
+    const response = await axios.get('/predefined-responses/active')
+    predefinedResponses.value = response.data?.responses || []
+  } catch (err) {
+    // Predefined responses are optional, ignore errors
+  }
+}
+
+const onPredefinedSelect = () => {
+  if (selectedPredefined.value) {
+    replyMessage.value = selectedPredefined.value
+  }
+}
+
 const cnicModalOpen = ref(false)
 const cnicInput = ref('')
 const cnicSubmitting = ref(false)
@@ -244,6 +262,7 @@ onMounted(() => {
   setupAudioUnlock()
   document.addEventListener('paste', handlePaste)
   pasteListenerActive.value = true
+  fetchPredefinedResponses()
 })
 
 onBeforeUnmount(() => {
@@ -556,27 +575,29 @@ const sendReply = async () => {
   replyMessage.value = ''
   clearAttachments()
 
-  try {
-    if (hasFiles) {
-      const formData = new FormData()
-      formData.append('chat_id', selectedChat.value.id)
-      formData.append('message', tempMessage)
-      formData.append('sender_type', 'agent')
-      if (tempFiles[0]?.file) {
-        formData.append('attachments', tempFiles[0].file)
-      }
-      await axios.post('/send-message', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
-    } else {
-      await axios.post('/send-message', {
-        chat_id: selectedChat.value.id,
-        message: tempMessage,
-        sender_type: 'agent'
-      })
-    }
-    sendError.value = ''
-  } catch (e) {
+   try {
+     if (hasFiles) {
+       const formData = new FormData()
+       formData.append('chat_id', selectedChat.value.id)
+       formData.append('message', tempMessage)
+       formData.append('sender_type', 'agent')
+       if (tempFiles[0]?.file) {
+         formData.append('attachments', tempFiles[0].file)
+       }
+       await axios.post('/send-message', formData, {
+         headers: { 'Content-Type': 'multipart/form-data' }
+       })
+     } else {
+       await axios.post('/send-message', {
+         chat_id: selectedChat.value.id,
+         message: tempMessage,
+         sender_type: 'agent'
+       })
+     }
+     sendError.value = ''
+     replyMessage.value = ''
+     selectedPredefined.value = ""
+   } catch (e) {
     sendError.value = extractErrorMessage(e, 'Failed to send. Please try again.')
     replyMessage.value = tempMessage
     attachedFiles.value = tempFiles
@@ -741,7 +762,7 @@ onMounted(() => {
 
 
 const filteredOpenChats = computed(() => {
-  return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
+  return chats.value.filter(chat => chat?.assigned_agent_id !== null && chat?.status === 'open');
 });
 
 const showAgentLoadModal = ref(false)
@@ -1161,7 +1182,8 @@ const filteredUnassignChatsByCompany = computed(() => {
             <div class="flex-1 min-w-0 pr-12">
               <div class="flex items-center gap-2 mb-0.5">
                 <span v-if="chat?.customer_name" :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
-                  Chat: {{ chat?.customer_name }}
+                  <!-- Chat: {{ chat?.customer_name }} -->
+                  Chat: {{ chat?.agent?.name }}
                 </span>
                 <span v-else :class="['text-sm text-gray-800', chat.unread_count > 0 ? 'font-bold' : 'font-semibold']">
                   Chat # {{ chat.id }}
@@ -1177,6 +1199,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                   v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
                   :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
                 >
+                fff
                   {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
@@ -1201,11 +1224,13 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
 
             <!-- Action buttons (Transfer + Close) -->
+            <!-- Add this line if you want to disable chat transfer for other user then assign chat user -->
+             <!-- :disabled="chat?.assigned_agent_id !== auth_user.id" -->
             <div class="absolute top-2 right-2 flex flex-col gap-1">
               <button
                 @click.stop="openTransferModal(chat)"
                 title="Transfer Chat"
-                :disabled="chat?.assigned_agent_id !== auth_user.id"
+                
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-amber-100 text-amber-600 hover:bg-amber-600 hover:text-white transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -1214,6 +1239,7 @@ const filteredUnassignChatsByCompany = computed(() => {
                 </svg>
               </button>
               <button
+                v-if="chat?.assigned_agent_id === auth_user.id"
                 @click.stop="closeChat(chat, $event)"
                 title="Close Chat"
                 class="w-6 h-6 rounded-md flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-600 hover:text-white transition-colors duration-150"
@@ -1348,8 +1374,8 @@ const filteredUnassignChatsByCompany = computed(() => {
             >
               #{{ selectedChat.id }}
             </div>
-            <div class="flex-1 min-w-0">
-              <div class="font-bold text-gray-900 text-sm tracking-tight">Chat #{{ selectedChat.id }}</div>
+            <div class="flex-1 min-w-0"> 
+              <div class="font-bold text-gray-900 text-sm tracking-tight">Chat #{{ selectedChat.id }} | {{ selectedChat?.customer_name }}</div>
               <div class="flex items-center gap-3 mt-0.5 flex-wrap">
                 <a
                   v-if="selectedChat.current_url"
@@ -1695,9 +1721,13 @@ const filteredUnassignChatsByCompany = computed(() => {
               </div>
             </div>
 
-            <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="relative flex items-center gap-0 px-4 py-3">
+            
+            <form @submit.prevent="sendReply" v-if="selectedChat?.assigned_agent_id === auth_user.id" class="relative px-4 py-3">
               <!-- Hidden file input -->
               <input ref="fileInputRef" type="file" class="hidden" @change="onFileInputChange" />
+
+              <!-- Predefined Response Dropdown -->
+              
 
               <div
                 v-if="selectedChat?.status === 'close' && dismissedClosedChatId !== selectedChat.id"
@@ -1717,11 +1747,25 @@ const filteredUnassignChatsByCompany = computed(() => {
                     Dismiss
                   </button>
                 </div>
+               </div>
+
+               <div class="flex items-center gap-0">
+                   <div  class="flex items-center gap-2 mb-2">
+                <select
+                  v-model="selectedPredefined"
+                  @change="onPredefinedSelect"
+                  class="flex-1 bg-slate-50 border border-slate-200 border-r-0 rounded-xl px-4 py-2.5 text-sm text-gray-900 outline-none focus:border-indigo-400 focus:bg-white transition-colors placeholder-slate-400 resize-none overflow-hidden mt-2 mr-3"
+                >
+                  <option value="">Select a quick response</option>
+                  <option v-for="resp in predefinedResponses" :key="resp.id" :value="resp.response">
+                    {{ resp.title }}
+                  </option>
+                </select>
               </div>
 
-              <button
-                type="button"
-                @click="triggerFileInput"
+               <button
+                 type="button"
+                 @click="triggerFileInput"
                 title="Attach files or Drag and drop here"
                 class="flex-shrink-0 flex items-center justify-center w-9 h-9 mr-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors border border-slate-200 hover:border-indigo-200"
                 :disabled="selectedChat?.status === 'close'"
@@ -1761,10 +1805,11 @@ const filteredUnassignChatsByCompany = computed(() => {
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 12 3 3l18 9-18 9 3-9Z" />
-                </svg>
-                Send
-              </button>
-            </form>
+                 </svg>
+                 Send
+               </button>
+               </div>
+             </form>
           </div>
         </template>
 
