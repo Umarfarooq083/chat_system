@@ -110,6 +110,10 @@ const cnicSubmitting = ref(false)
 const cnicResult = ref(null)
 const cnicError = ref('')
 
+const cnicLookupLoading = ref(false)
+const cnicLookupErrors = ref({})
+const cnicRegistrations = ref({})
+
 const showTransferModal = ref(false)
 const transferLoading = ref(false)
 const selectedTransferChat = ref(null)
@@ -670,7 +674,50 @@ const getUserCnicInfo = (msg) => {
   try {
     return JSON.parse(msg)?.cnic || ''
   } catch (e) {
-    return {}
+    return ''
+  }
+}
+
+const lookupCnicFromMessage = async (chat, msg) => {
+  if (!chat?.id) return
+  
+  const cnic = getUserCnicInfo(msg?.message)
+  if (!cnic) {
+    cnicLookupErrors.value[msg.id] = 'CNIC not found in message.'
+    return
+  }
+
+  cnicLookupLoading.value = true
+  cnicLookupErrors.value[msg.id] = ''
+  
+  try {
+    const response = await axios.post('/agent/cnic/lookup', { cnic: cnic })
+    const result = response?.data ?? null
+    
+    if (result) {
+      const files = result?.data?.data?.files || []
+      let filesList = ''
+      if (files.length) {
+        filesList = files.map(f => `${f.reg_no}`).join('\n')
+      } else {
+        filesList = '- No registration numbers found'
+      }
+      
+      const formattedMessage = `Registration Numbers:\n${filesList}` +
+        (result?.data?.data?.message ? `\n\nMessage: ${result.data.data.message}` : '')
+      
+      await axios.post('/send-message', {
+        chat_id: chat.id,
+        message: formattedMessage,
+        sender_type: 'agent',
+        message_type: 'system'
+      })
+    }
+  } catch (e) {
+    const errorMsg = extractErrorMessage(e) || 'Failed to lookup CNIC.'
+    cnicLookupErrors.value[msg.id] = errorMsg
+  } finally {
+    cnicLookupLoading.value = false
   }
 }
 
@@ -964,7 +1011,7 @@ const isMessageReadByRecipient = (msg) => {
 
 const filteredUnassignChatsByCompany = computed(() => {
   return filteredUnassignChats.value.filter(chat =>
-    props.loginUserCompniesList.includes(chat.company_id)
+    (props.loginUserCompniesList || []).includes(chat.company_id)
   )
 })
 </script>
@@ -1222,7 +1269,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                   v-if="(chat?.assigned_agent_id === auth_user.id || chat?.assigned_agent_id == null) && slaBadgeLabel(chat)"
                   :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border', slaBadgeClass(chat)]"
                 >
-                fff
                   {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
@@ -1692,9 +1738,23 @@ const filteredUnassignChatsByCompany = computed(() => {
                   ]"
                 >
                 <span v-if="msg?.message_type === 'cnic_response'">
-                  CINC Info Received:
+                  CNIC Info Received:
                   <br>
-                  {{ getUserCnicInfo(msg?.message)}} 
+                  {{ getUserCnicInfo(msg?.message)}}
+                  <div class="flex flex-wrap items-center gap-2 mt-3">
+                    <button
+                      type="button"
+                      @click="lookupCnicFromMessage(selectedChat, msg)"
+                      class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                      :disabled="cnicLookupLoading"
+                    >
+                      {{ cnicLookupLoading ? 'Looking up...' : 'Lookup CNIC Details' }}
+                    </button>
+                    
+                    <div v-if="cnicLookupErrors[msg.id]" class="mt-2 text-xs text-red-700 whitespace-pre-line">
+                      {{ cnicLookupErrors[msg.id] }}
+                    </div>
+                  </div>
                 </span>
                 <span v-else>
                     {{ msg?.message }} 
