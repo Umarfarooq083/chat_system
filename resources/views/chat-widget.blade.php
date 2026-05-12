@@ -111,6 +111,16 @@
             <button class="form-btn primary" id="submitInfo" type="button">Submit</button>
         </div>
     </div>
+    <div class="info-form" id="cnicForm">
+        <div class="hint" style="color: #0f172a; font-weight: 600;">Please provide your CNIC:</div>
+        <div class="form-row">
+            <input class="form-input" id="cnic" type="text" placeholder="CNIC" required>
+        </div>
+        <div class="row" style="justify-content: flex-end; gap: 8px; padding-top:10px">
+            <button class="form-btn secondary" id="cancelCnic" type="button">Cancel</button>
+            <button class="form-btn primary" id="submitCnic" type="button">Submit</button>
+        </div>
+    </div>
     <div class="composer">
         <button class="attach-btn" id="attachBtn" type="button" title="Attach file"><i data-v-bff3308f="" class="fa fa-paperclip"></i></button>
        
@@ -142,6 +152,7 @@
     const prechatPhoneEl = document.getElementById('prechatPhone');
     const prechatSubmitBtn = document.getElementById('prechatSubmit');
     const infoFormEl = document.getElementById('infoForm');
+    const cnicFormEl = document.getElementById('cnicForm');
     const phoneEl = document.getElementById('phone');
     const customerNameEl = document.getElementById('customerName');
     const registrationNoListEl = document.getElementById('registrationNoList');
@@ -149,6 +160,9 @@
     const emailEl = document.getElementById('email');
     const submitInfoBtn = document.getElementById('submitInfo');
     const cancelInfoBtn = document.getElementById('cancelInfo');
+    const cnicEl = document.getElementById('cnic');
+    const submitCnicBtn = document.getElementById('submitCnic');
+    const cancelCnicBtn = document.getElementById('cancelCnic');
 
     function uuid() {
         if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -173,6 +187,7 @@
     let renderedMessageIds = new Set();
     let showPrechatForm = false;
     let showUserForm = false;
+    let showCnicForm = false;
     let attachedFile = null;
     let lastSentUrl = null;
     let urlTrackingSetup = false;
@@ -302,6 +317,16 @@
             } catch (e) {
                 body.textContent = formatMessageBody(latestMessage.message);
             }
+        } else if (latestMessage.message_type === 'cnic_response') {
+            try {
+                const info = typeof latestMessage.message === 'string' ? JSON.parse(latestMessage.message) : latestMessage.message;
+                body.innerHTML = `
+                    <div style="font-weight: 600; margin-bottom: 4px;">CNIC Sent:</div>
+                    <div>CNIC: ${info.cnic || ''}</div>
+                `;
+            } catch (e) {
+                body.textContent = formatMessageBody(latestMessage.message);
+            }
         } else {
             body.textContent = formatMessageBody(latestMessage.message);
         }
@@ -353,6 +378,7 @@
         if (chatClosed) {
             showPrechatForm = false;
             showUserForm = false;
+            showCnicForm = false;
         }
         if (showPrechatForm) {
             prechatFormEl.classList.add('show');
@@ -363,6 +389,11 @@
             infoFormEl.classList.add('show');
         } else {
             infoFormEl.classList.remove('show');
+        }
+        if (showCnicForm) {
+            cnicFormEl.classList.add('show');
+        } else {
+            cnicFormEl.classList.remove('show');
         }
 
         const blockComposer = showPrechatForm === true || chatClosed === true;
@@ -408,6 +439,7 @@
 
         showPrechatForm = !!data.chat?.prechat_required;
         showUserForm = false;
+        showCnicForm = false;
 
         (data.messages || []).forEach(m => {
             renderMessage(m);
@@ -417,6 +449,12 @@
             }
             if (m.message_type === 'user_info_response' && m.sender_type === 'visitor') {
                 showUserForm = false;
+            }
+            if (m.message_type === 'cnic_request') {
+                showCnicForm = true;
+            }
+            if (m.message_type === 'cnic_response' && m.sender_type === 'visitor') {
+                showCnicForm = false;
             }
             if (m.message_type === 'prechat_info_request') {
                 showPrechatForm = true;
@@ -490,6 +528,12 @@
                 }
                 if (message.message_type === 'user_info_response' && message.sender_type === 'visitor') {
                     showUserForm = false;
+                }
+                if (message.message_type === 'cnic_request') {
+                    showCnicForm = true;
+                }
+                if (message.message_type === 'cnic_response' && message.sender_type === 'visitor') {
+                    showCnicForm = false;
                 }
                 if (message.message_type === 'prechat_info_request') {
                     showPrechatForm = true;
@@ -737,6 +781,43 @@
         }
     }
 
+    async function submitCnic() {
+        const cnic = (cnicEl?.value || '').toString().trim();
+        if (!cnic) {
+            alert('Please enter your CNIC.');
+            return;
+        }
+
+        submitCnicBtn.disabled = true;
+        try {
+            const formData = new FormData();
+            formData.append('visitor_id', visitorId);
+            formData.append('chat_id', chatId);
+            formData.append('company_id', companyId);
+            formData.append('message', `CNIC: ${cnic}`);
+            formData.append('message_type', 'cnic_response');
+            formData.append('cnic', cnic);
+            formData.append('current_url', document.referrer || null);
+            formData.append('referrer_url', document.referrer || null);
+
+            const response = await fetch(`${apiBase}/message`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) {
+                throw new Error(`Request failed (${response.status}): ${response.statusText}`);
+            }
+
+            showCnicForm = false;
+            updateFormVisibility();
+            if (cnicEl) cnicEl.value = '';
+        } catch (error) {
+            alert('Failed to send CNIC. Please try again.');
+        } finally {
+            submitCnicBtn.disabled = false;
+        }
+    }
+
     async function markVisitorRead() {
         if (!chatId) return;
         try {
@@ -754,6 +835,12 @@
         customerNameEl.value = '';
         resetRegistrationInputs();
         emailEl.value = '';
+    }
+
+    function cancelCnic() {
+        showCnicForm = false;
+        updateFormVisibility();
+        if (cnicEl) cnicEl.value = '';
     }
 
     function setupUrlTracking() {
@@ -887,6 +974,8 @@
      prechatSubmitBtn.addEventListener('click', submitPrechat);
     submitInfoBtn.addEventListener('click', submitInfo);
     cancelInfoBtn.addEventListener('click', cancelInfo);
+    submitCnicBtn.addEventListener('click', submitCnic);
+    cancelCnicBtn.addEventListener('click', cancelCnic);
     if (addRegistrationNoBtn) addRegistrationNoBtn.addEventListener('click', addRegistrationInput);
 
     textEl.addEventListener('input', updateSendButton);

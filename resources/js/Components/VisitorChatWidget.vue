@@ -12,6 +12,7 @@ const fileInputRef = ref(null)
 const messageContainer = ref(null)
 const showPrechatForm = ref(false)
 const showUserForm = ref(false)
+const showCnicForm = ref(false)
 const sendError = ref('')
 const chatClosed = ref(false)
 const chatReadState = ref({
@@ -27,6 +28,9 @@ const userForm = ref({
 const prechatForm = ref({
   name: '',
   phone: '',
+})
+const cnicForm = ref({
+  cnic: '',
 })
 let chatId = null
 let visitorId = null
@@ -140,6 +144,12 @@ onMounted(async () => {
       showUserForm.value = true
     }
 
+    const hasPendingCnicRequest = messages.value.some(msg => msg.message_type === 'cnic_request') &&
+      !messages.value.some(msg => msg.message_type === 'cnic_response')
+    if (hasPendingCnicRequest) {
+      showCnicForm.value = true
+    }
+
     const chat = response.data?.chat || {}
     const phone = (chat.phone || '').toString().trim()
     const name = (chat.customer_name || '').toString().trim()
@@ -166,6 +176,12 @@ onMounted(async () => {
           // Hide form if user just submitted response
           if (e.message.message_type === 'user_info_response' && e.message.sender_type === 'visitor') {
             showUserForm.value = false
+          }
+          if (e.message.message_type === 'cnic_request') {
+            showCnicForm.value = true
+          }
+          if (e.message.message_type === 'cnic_response' && e.message.sender_type === 'visitor') {
+            showCnicForm.value = false
           }
           if (e.message.sender_type === 'agent') {
             markVisitorRead()
@@ -483,6 +499,41 @@ const submitUserInfo = async () => {
   }
 }
 
+const submitCnic = async () => {
+  if (!chatId) return
+
+  const cnic = (cnicForm.value.cnic || '').toString().trim()
+  if (!cnic) {
+    sendError.value = 'Please enter your CNIC.'
+    return
+  }
+
+  try {
+    const cfg = window.ChatConfig || {}
+    const apiBase = cfg.apiBase || ''
+    const headers = {}
+    if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
+
+    const sendUrl = apiBase ? apiBase + '/message' : '/send-message'
+
+    await axios.post(sendUrl, {
+      chat_id: chatId,
+      message: 'CNIC: ' + cnic,
+      sender_type: 'visitor',
+      message_type: 'cnic_response',
+      cnic,
+    }, { headers })
+
+    sendError.value = ''
+    showCnicForm.value = false
+    cnicForm.value = { cnic: '' }
+    await scrollToBottom()
+  } catch (error) {
+    console.error('Failed to send CNIC:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to send. Please try again.')
+  }
+}
+
 const getUserInfo = (msg) => {
   try {
     return typeof msg.message === 'string'
@@ -496,6 +547,11 @@ const getUserInfo = (msg) => {
 const cancelUserInfo = () => {
   showUserForm.value = false
   userForm.value = { phone: '', customerName: '', registrationNo: [''], email: '' }
+}
+
+const cancelCnic = () => {
+  showCnicForm.value = false
+  cnicForm.value = { cnic: '' }
 }
 
 const addRegistration = () => {
@@ -528,7 +584,7 @@ const removeRegistration = (index) => {
             'flex',
             msg.sender_type === 'visitor' ? 'justify-end' : 'justify-start'
           ]"
-          v-show="msg.message_type !== 'user_info_request'"
+          v-show="msg.message_type !== 'user_info_request' && msg.message_type !== 'cnic_request'"
         >
           <div 
             :class="[
@@ -562,6 +618,15 @@ const removeRegistration = (index) => {
                 </strong>
                 <div><strong>Name:</strong> {{ getUserInfo(msg).name }}</div>
                 <div><strong>Phone:</strong> {{ getUserInfo(msg).phone }}</div>
+              </div>
+            </div>
+
+            <div class="text-sm whitespace-pre-line" v-else-if="msg?.message_type === 'cnic_response'">
+              <div class="text-sm whitespace-pre-line">
+                <strong class="text-xs font-bold whitespace-pre-line mb-1.5 flex items-center gap-1.5" style="font-size: 15px;">
+                  CNIC Sent:
+                </strong>
+                <div><strong>CNIC:</strong> {{ getUserInfo(msg).cnic }}</div>
               </div>
             </div>
 
@@ -726,6 +791,29 @@ const removeRegistration = (index) => {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- CNIC Form -->
+      <div v-if="showCnicForm" class="border-t p-3 bg-slate-50 info_form">
+        <h4 class="font-semibold text-slate-800 mb-3">Please provide your CNIC:</h4>
+        <form @submit.prevent="submitCnic" class="row gx-1">
+          <div class="col-12 mb-1">
+            <input
+              v-model="cnicForm.cnic"
+              type="text"
+              required
+              placeholder="CNIC"
+              class="form-control form-control-sm"
+            />
+          </div>
+
+          <div class="col-md-12 mt-2">
+            <div class="row gap-2 m-0 justify-content-end">
+              <button type="submit" class="btn btn-primary btn-sm w-25">Submit</button>
+              <button type="button" @click="cancelCnic" class="btn btn-secondary btn-sm w-25">Cancel</button>
             </div>
           </div>
         </form>

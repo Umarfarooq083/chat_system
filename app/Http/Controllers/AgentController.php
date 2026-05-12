@@ -657,7 +657,7 @@ class AgentController extends Controller
 
         $chat->load([
             'latestMessage' => function ($query) {
-                $query->select(
+                $query  ->select(
                     'messages.id',
                     'messages.chat_id',
                     'messages.sender_type',

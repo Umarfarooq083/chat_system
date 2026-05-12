@@ -634,6 +634,22 @@ const showUserInfoForm = async (chat, event) => {
   } catch (e) { }
 }
 
+const showCnicForm = async (chat, event) => {
+  if (event?.stopPropagation) event.stopPropagation()
+  if (selectedChat.value?.id !== chat?.id) {
+    await selectChat(chat)
+  }
+  const formData = {
+    chat_id: chat.id,
+    message: 'Please provide your CNIC:',
+    sender_type: 'agent',
+    message_type: 'cnic_request'
+  }
+  try {
+    await axios.post('/send-message', formData)
+  } catch (e) { }
+}
+
 const moveChatToTop = (chatId) => {
   const index = chats.value.findIndex(c => c.id === chatId)
   if (index <= 0) return
@@ -646,6 +662,13 @@ const getUserInfo = (msg) => {
     return typeof msg.message === 'string'
       ? JSON.parse(msg.message)
       : msg.message
+  } catch (e) {
+    return {}
+  }
+}
+const getUserCnicInfo = (msg) => {
+  try {
+    return JSON.parse(msg)?.cnic || ''
   } catch (e) {
     return {}
   }
@@ -1203,9 +1226,13 @@ const filteredUnassignChatsByCompany = computed(() => {
                   {{ slaBadgeLabel(chat) }}
                 </span>
               </div>
-
+           
+              <!-- {{ chat?.latest_message }} -->
               <p class="text-xs text-slate-500 truncate mb-1" v-if="chat?.latest_message?.message_type == 'user_info_response'">
                 {{ getUserInfo(chat?.latest_message?.message) }}
+              </p>
+              
+              <p class="text-xs text-slate-500 truncate mb-1" v-else-if="chat?.latest_message?.message_type == 'cnic_response'">
               </p>
               <p v-else-if="chat?.latest_message?.message_type == 'prechat_info_response'" class="text-xs text-slate-500 truncate mb-1">
                 {{ chat?.customer_name }}
@@ -1410,6 +1437,17 @@ const filteredUnassignChatsByCompany = computed(() => {
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 12 3 3l18 9-18 9 3-9Z" />
+                </svg>
+              </button>
+
+              <button
+                @click="showCnicForm(selectedChat)"
+                title="Send CNIC Form"
+                class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700 hover:bg-slate-700 hover:text-white transition-colors duration-150"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M4 4h16v16H4z" opacity=".2" />
+                  <path d="M6 7h6v2H6V7zm0 4h12v2H6v-2zm0 4h9v2H6v-2z" />
                 </svg>
               </button>
 
@@ -1653,7 +1691,14 @@ const filteredUnassignChatsByCompany = computed(() => {
                       : 'bg-white text-gray-800 rounded-2xl rounded-bl-sm border border-slate-200 shadow-sm'
                   ]"
                 >
-                  {{ msg.message }}
+                <span v-if="msg?.message_type === 'cnic_response'">
+                  CINC Info Received:
+                  <br>
+                  {{ getUserCnicInfo(msg?.message)}} 
+                </span>
+                <span v-else>
+                    {{ msg?.message }} 
+                </span>
                 </div>
               </div>
 

@@ -189,6 +189,7 @@ class ChatController extends Controller
             'registration_no' => 'nullable',
             'registration_no.*' => 'nullable|string|max:100',
             'email' => 'nullable|string|max:255',
+            'cnic' => 'nullable|string|max:30',
         ]);
 
         try {
@@ -224,6 +225,15 @@ class ChatController extends Controller
 
             $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
+            if ($request->sender_type === 'visitor' && $messageType === 'cnic_response') {
+                $cnic = $request->input('cnic');
+                $cnic = is_string($cnic) ? trim($cnic) : null;
+                if (! $cnic) {
+                    return response()->json([
+                        'message' => 'CNIC is required.',
+                    ], 422);
+                }
+            }
 
             $chat_message = [];
             $registrationNumbers = $request->input('registration_no');
@@ -295,6 +305,11 @@ class ChatController extends Controller
                     'type' => 'prechat_info_response',
                     'name' => $request->customer_name,
                     'phone' => $request->phone,
+                ];
+            } elseif ($request->message_type == 'cnic_response') {
+                $chat_message = [
+                    'type' => 'cnic_response',
+                    'cnic' => trim((string) $request->input('cnic')),
                 ];
             } else {
                 $chat_message = $request->message;
