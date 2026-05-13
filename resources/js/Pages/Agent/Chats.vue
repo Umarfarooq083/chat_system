@@ -109,10 +109,12 @@ const cnicInput = ref('')
 const cnicSubmitting = ref(false)
 const cnicResult = ref(null)
 const cnicError = ref('')
+const cnicChatId = ref(null)
 
-const cnicLookupLoading = ref(false)
+const cnicLookupLoading = ref({})
 const cnicLookupErrors = ref({})
-const cnicRegistrations = ref({})
+const cnicLookupResults = ref({})
+const cnicFetchLoading = ref({})
 
 const showTransferModal = ref(false)
 const transferLoading = ref(false)
@@ -185,18 +187,20 @@ const transferChat = async () => {
   }
 }
 
-const openCnicModal = () => {
+const openCnicModal = (chatId = null) => {
   cnicModalOpen.value = true
   cnicInput.value = ''
   cnicSubmitting.value = false
   cnicResult.value = null
   cnicError.value = ''
+  cnicChatId.value = chatId || null
 }
 
 const closeCnicModal = () => {
   cnicModalOpen.value = false
   cnicSubmitting.value = false
   cnicError.value = ''
+  cnicChatId.value = null
 }
 
 const dismissClosedOverlay = () => {
@@ -220,6 +224,7 @@ const closeImageViewer = () => {
 const submitCnicLookup = async () => {
   cnicError.value = ''
   cnicResult.value = null
+  cnicFetchLoading.value = {}
 
   const digits = (cnicInput.value || '').toString().replace(/\D+/g, '')
   console.log(digits.length)
@@ -237,6 +242,27 @@ const submitCnicLookup = async () => {
     cnicError.value = extractErrorMessage(e) || 'Failed to lookup CNIC.'
   } finally {
     cnicSubmitting.value = false
+  }
+}
+
+const fetchCnicRegistrationData = async (registrationNo) => {
+  const chatId = cnicChatId.value || selectedChat.value?.id
+  if (!chatId) {
+    sendError.value = 'No chat selected. Please select a chat first.'
+    return
+  }
+  if (!registrationNo) return
+
+  const regStr = registrationNo.toString().trim()
+  cnicFetchLoading.value[regStr] = true
+
+  try {
+    await axios.post(`/agent/chats/${chatId}/external/fetch`, { registration_no: regStr })
+    sendError.value = ''
+  } catch (e) {
+    sendError.value = extractErrorMessage(e, 'Failed to fetch data for registration.')
+  } finally {
+    cnicFetchLoading.value[regStr] = false
   }
 }
 
@@ -687,8 +713,9 @@ const lookupCnicFromMessage = async (chat, msg) => {
     return
   }
 
-  cnicLookupLoading.value = true
+  cnicLookupLoading.value[msg.id] = true
   cnicLookupErrors.value[msg.id] = ''
+  cnicLookupResults.value[msg.id] = null
   
   try {
     const response = await axios.post('/agent/cnic/lookup', { cnic: cnic })
@@ -696,28 +723,17 @@ const lookupCnicFromMessage = async (chat, msg) => {
     
     if (result) {
       const files = result?.data?.data?.files || []
-      let filesList = ''
-      if (files.length) {
-        filesList = files.map(f => `${f.reg_no}`).join('\n')
-      } else {
-        filesList = '- No registration numbers found'
+      const apiMessage = result?.data?.data?.message || null
+      cnicLookupResults.value = { 
+        ...cnicLookupResults.value, 
+        [msg.id]: { files, message: apiMessage } 
       }
-      
-      const formattedMessage = `Registration Numbers:\n${filesList}` +
-        (result?.data?.data?.message ? `\n\nMessage: ${result.data.data.message}` : '')
-      
-      await axios.post('/send-message', {
-        chat_id: chat.id,
-        message: formattedMessage,
-        sender_type: 'agent',
-        message_type: 'system'
-      })
     }
   } catch (e) {
     const errorMsg = extractErrorMessage(e) || 'Failed to lookup CNIC.'
     cnicLookupErrors.value[msg.id] = errorMsg
   } finally {
-    cnicLookupLoading.value = false
+    cnicLookupLoading.value[msg.id] = false
   }
 }
 
@@ -1029,13 +1045,13 @@ const filteredUnassignChatsByCompany = computed(() => {
           <h2 class="text-base font-bold text-gray-900 tracking-tight">Agent Dashboard</h2>
         </div>
         <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
-            @click="openCnicModal"
-          >
-            CNIC Lookup
-          </button>
+           <button
+             type="button"
+             class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+             @click="openCnicModal(selectedChat?.id)"
+           >
+             CNIC Lookup
+           </button>
           <div
             class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 uppercase tracking-widest">
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -1116,21 +1132,35 @@ const filteredUnassignChatsByCompany = computed(() => {
         </div>
 
         <div v-if="cnicResult" class="mt-4">
-          <table class="w-full text-left text-sm text-gray-600 mb-4">
-            <thead>
-              <tr>
-                <th class="py-1 px-2 font-medium text-slate-700">CNIC No : {{ cnicResult?.cnic }}</th>
-              </tr>
-              <tr>
-                <th class="py-1 px-2 font-medium text-slate-700">Registration No:</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="py-1 px-2" v-for="value in cnicResult?.data?.data?.files" :key="value">{{ value?.reg_no }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="text-sm font-medium text-slate-700 mb-2">CNIC No: {{ cnicResult?.cnic }}</div>
+          <div class="text-sm font-medium text-slate-700 mb-3">Registration Numbers:</div>
+          
+          <div v-if="cnicResult?.data?.data?.files?.length" class="space-y-2">
+            <div 
+              v-for="file in cnicResult.data.data.files" 
+              :key="file.reg_no"
+              class="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
+            >
+              <span class="text-sm text-slate-700 font-mono">{{ file.reg_no }}</span>
+              <button
+                type="button"
+                @click="fetchCnicRegistrationData(file.reg_no)"
+                class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                :disabled="cnicFetchLoading[file.reg_no]"
+              >
+                <svg v-if="cnicFetchLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                  <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                  <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                </svg>
+                <span>{{ cnicFetchLoading[file.reg_no] ? 'Fetching...' : 'Fetch Data' }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-else class="text-sm text-slate-500 italic">- No registration numbers found</div>
+
+          <div v-if="cnicResult?.data?.data?.message" class="mt-3 text-sm text-slate-600 bg-slate-50 p-2 rounded border border-slate-200">
+            <strong>Message:</strong> {{ cnicResult.data.data.message }}
+          </div>
         </div>
 
         <div class="mt-6 flex justify-end gap-2">
@@ -1746,14 +1776,57 @@ const filteredUnassignChatsByCompany = computed(() => {
                       type="button"
                       @click="lookupCnicFromMessage(selectedChat, msg)"
                       class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                      :disabled="cnicLookupLoading"
+                      :disabled="cnicLookupLoading[msg.id]"
                     >
-                      {{ cnicLookupLoading ? 'Looking up...' : 'Lookup CNIC Details' }}
+                      <svg v-if="cnicLookupLoading[msg.id]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                      </svg>
+                      <span>{{ cnicLookupLoading[msg.id] ? 'Looking up...' : 'Lookup CNIC Details' }}</span>
                     </button>
-                    
-                    <div v-if="cnicLookupErrors[msg.id]" class="mt-2 text-xs text-red-700 whitespace-pre-line">
-                      {{ cnicLookupErrors[msg.id] }}
+                  </div>
+
+                  <!-- Loading state -->
+                  <div v-if="cnicLookupLoading[msg.id]" class="mt-2 text-xs text-slate-500">
+                    Fetching registration details...
+                  </div>
+
+                  <!-- Result: Registration numbers with Fetch Data buttons -->
+                  <div v-if="cnicLookupResults[msg.id]?.files?.length" class="mt-3 space-y-2">
+                    <div 
+                      v-for="file in cnicLookupResults[msg.id].files" 
+                      :key="file.reg_no"
+                      class="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded border border-slate-200"
+                    >
+                      <span class="text-sm text-slate-700 font-mono">{{ file.reg_no }}</span>
+                      <button
+                        type="button"
+                        @click="fetchCnicRegistrationData(file.reg_no)"
+                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                        :disabled="cnicFetchLoading[file.reg_no]"
+                      >
+                        <svg v-if="cnicFetchLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                          <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                          <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                        </svg>
+                        <span>{{ cnicFetchLoading[file.reg_no] ? 'Fetching...' : 'Fetch Data' }}</span>
+                      </button>
                     </div>
+                  </div>
+
+                  <!-- No results found (after lookup completed) -->
+                  <div v-if="cnicLookupResults[msg.id] && !cnicLookupLoading[msg.id] && !cnicLookupResults[msg.id]?.files?.length" class="mt-2 text-sm text-slate-500 italic">
+                    No registration numbers found.
+                  </div>
+
+                  <!-- Optional message from API -->
+                  <div v-if="cnicLookupResults[msg.id]?.message" class="mt-2 text-sm text-slate-600 bg-slate-50 p-2 rounded border border-slate-200">
+                    {{ cnicLookupResults[msg.id].message }}
+                  </div>
+
+                  <!-- Error message -->
+                  <div v-if="cnicLookupErrors[msg.id]" class="mt-2 text-xs text-red-700 whitespace-pre-line">
+                    {{ cnicLookupErrors[msg.id] }}
                   </div>
                 </span>
                 <span v-else>
