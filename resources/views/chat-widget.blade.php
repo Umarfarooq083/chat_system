@@ -70,14 +70,14 @@
     </div>
     <div class="body" id="messages"></div>
     <div class="chat-closed-overlay" id="chatClosedOverlay" style="display: none;">
-        <div class="text-center">
+        <div class="text-center" style="text-align: center; margin-left: 17px;">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 text-slate-400" style="color: #94a3b8;">
                 <path d="M18 6 6 18" />
                 <path d="M6 6l12 12" />
             </svg>
             <div style="font-weight: 600; color: #475569; font-size: 14px; margin-bottom: 4px;">Chat Closed</div>
             <div style="color: #64748b; font-size: 12px; margin-bottom: 12px;">No further messages can be sent.</div>
-            <button class="btn btn-success btn-sm new-chat" id="newChatBtnOverlay" type="button" style="margin-top: 16px;">New Chat</button>
+            <button class="btn btn-success btn-sm new-chat" id="newChatBtnOverlay" type="button" style="margin-top: 5px; padding: 10px;">New Chat</button>
         </div>
     </div>
     <div class="prechat-form" id="prechatForm">
@@ -125,7 +125,7 @@
         <button class="attach-btn" id="attachBtn" type="button" title="Attach file"><i data-v-bff3308f="" class="fa fa-paperclip"></i></button>
        
         <textarea class="input" id="text" placeholder="Type a message…" rows="1"
-  style="resize: none; overflow: hidden;"></textarea>
+        style="resize: none; overflow: hidden;"></textarea>
 
         <input type="file" id="fileInput" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt">
         <button class="send" id="sendBtn" type="button" disabled>Send</button>
@@ -414,6 +414,8 @@
          const overlay = document.getElementById('chatClosedOverlay');
          if (overlay) {
              overlay.style.display = chatClosed ? 'flex' : 'none';
+             overlay.style.justifyContent = chatClosed ? 'start' : 'none';
+             overlay.style.alignItems = chatClosed ? 'center' : 'none';
          }
 
          newChatBtn.style.display = chatClosed ? 'inline-flex' : 'none';

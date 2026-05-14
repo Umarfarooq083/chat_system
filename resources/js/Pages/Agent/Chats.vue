@@ -45,6 +45,8 @@ const pollCursor = ref(props.pollCursor)
 const showImageViewer = ref(false)
 const currentImageUrl = ref('')
 const currentImageName = ref('')
+const totalAgentActiveChats = ref('')
+
 
 let onlineFlagsIntervalId = null
 let pollIntervalId = null
@@ -115,6 +117,7 @@ const cnicLookupLoading = ref({})
 const cnicLookupErrors = ref({})
 const cnicLookupResults = ref({})
 const cnicFetchLoading = ref({})
+const cnicSendLoading = ref({})
 
 const showTransferModal = ref(false)
 const transferLoading = ref(false)
@@ -249,7 +252,7 @@ const fetchCnicRegistrationData = async (registrationNo) => {
   const chatId = cnicChatId.value || selectedChat.value?.id
   if (!chatId) {
     sendError.value = 'No chat selected. Please select a chat first.'
-    return
+    return null
   }
   if (!registrationNo) return
 
@@ -257,12 +260,46 @@ const fetchCnicRegistrationData = async (registrationNo) => {
   cnicFetchLoading.value[regStr] = true
 
   try {
-    await axios.post(`/agent/chats/${chatId}/external/fetch`, { registration_no: regStr })
+    const response = await axios.post(`/agent/chats/${chatId}/external/fetch`, { registration_no: regStr })
+    if (response.data?.chat) mergeChatIntoList(response.data.chat)
     sendError.value = ''
+    return response?.data ?? null
   } catch (e) {
     sendError.value = extractErrorMessage(e, 'Failed to fetch data for registration.')
+    return null
   } finally {
     cnicFetchLoading.value[regStr] = false
+  }
+}
+
+const resolveChatForCnicAction = () => {
+  const chatId = cnicChatId.value || selectedChat.value?.id
+  if (!chatId) return null
+  if (selectedChat.value?.id === chatId) return selectedChat.value
+  return chats.value.find(c => c.id === chatId) || null
+}
+
+const sendCnicRegistrationHtml = async (registrationNo) => {
+  const regStr = (registrationNo || '').toString().trim()
+  if (!regStr) return
+
+  const chat = resolveChatForCnicAction()
+  if (!chat?.id) {
+    sendError.value = 'No chat selected. Please select a chat first.'
+    return
+  }
+
+  cnicSendLoading.value[regStr] = true
+  try {
+    // Ensure we have fetched data for this registration number (so HTML exists).
+    await fetchCnicRegistrationData(regStr)
+    await sendExternalHtml(chat, regStr)
+    sendError.value = ''
+  } catch (e) {
+    // sendExternalHtml already sets sendError, keep a fallback.
+    sendError.value = extractErrorMessage(e, 'Failed to send HTML for registration.')
+  } finally {
+    cnicSendLoading.value[regStr] = false
   }
 }
 
@@ -1142,18 +1179,33 @@ const filteredUnassignChatsByCompany = computed(() => {
               class="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
             >
               <span class="text-sm text-slate-700 font-mono">{{ file.reg_no }}</span>
-              <button
-                type="button"
-                @click="fetchCnicRegistrationData(file.reg_no)"
-                class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                :disabled="cnicFetchLoading[file.reg_no]"
-              >
-                <svg v-if="cnicFetchLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
-                  <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
-                  <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
-                </svg>
-                <span>{{ cnicFetchLoading[file.reg_no] ? 'Fetching...' : 'Fetch Data' }}</span>
-              </button>
+              <div class="flex items-center gap-2">
+                <!-- <button
+                  type="button"
+                  @click="fetchCnicRegistrationData(file.reg_no)"
+                  class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                  :disabled="cnicFetchLoading[file.reg_no] || cnicSendLoading[file.reg_no]"
+                >
+                  <svg v-if="cnicFetchLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                    <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                  </svg>
+                  <span>{{ cnicFetchLoading[file.reg_no] ? 'Fetching...' : 'Fetch Data' }}</span>
+                </button> -->
+
+                <!-- <button
+                  type="button"
+                  @click="sendCnicRegistrationHtml(file.reg_no)"
+                  class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                  :disabled="cnicFetchLoading[file.reg_no] || cnicSendLoading[file.reg_no]"
+                >
+                  <svg v-if="cnicSendLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                    <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                  </svg>
+                  <span>{{ cnicSendLoading[file.reg_no] ? 'Sending...' : 'Send PDF' }}</span>
+                </button> -->
+              </div>
             </div>
           </div>
           <div v-else class="text-sm text-slate-500 italic">- No registration numbers found</div>
@@ -1769,7 +1821,6 @@ const filteredUnassignChatsByCompany = computed(() => {
                 >
                 <span v-if="msg?.message_type === 'cnic_response'">
                   CNIC Info Received:
-                  <br>
                   {{ getUserCnicInfo(msg?.message)}}
                   <div class="flex flex-wrap items-center gap-2 mt-3">
                     <button
@@ -1799,18 +1850,33 @@ const filteredUnassignChatsByCompany = computed(() => {
                       class="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded border border-slate-200"
                     >
                       <span class="text-sm text-slate-700 font-mono">{{ file.reg_no }}</span>
-                      <button
-                        type="button"
-                        @click="fetchCnicRegistrationData(file.reg_no)"
-                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                        :disabled="cnicFetchLoading[file.reg_no]"
-                      >
-                        <svg v-if="cnicFetchLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
-                          <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
-                          <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
-                        </svg>
-                        <span>{{ cnicFetchLoading[file.reg_no] ? 'Fetching...' : 'Fetch Data' }}</span>
-                      </button>
+                      <div class="flex items-center gap-2">
+                        <!-- <button
+                          type="button"
+                          @click="fetchCnicRegistrationData(file.reg_no)"
+                          class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                          :disabled="cnicFetchLoading[file.reg_no] || cnicSendLoading[file.reg_no]"
+                        >
+                          <svg v-if="cnicFetchLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                            <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                          </svg>
+                          <span>{{ cnicFetchLoading[file.reg_no] ? 'Fetching...' : 'Fetch Data' }}</span>
+                        </button> -->
+
+                        <button
+                          type="button"
+                          @click="sendCnicRegistrationHtml(file.reg_no)"
+                          class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                          :disabled="cnicFetchLoading[file.reg_no] || cnicSendLoading[file.reg_no]"
+                        >
+                          <svg v-if="cnicSendLoading[file.reg_no]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+                            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                            <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                          </svg>
+                          <span>{{ cnicSendLoading[file.reg_no] ? 'Sending...' : 'Send PDF' }}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
