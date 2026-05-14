@@ -240,6 +240,7 @@ class ChatWidgetController extends Controller
             'registration_no' => 'nullable',
             'registration_no.*' => 'nullable|string|max:100',
             'email' => 'nullable|string|max:255',
+            'cnic' => 'nullable|string|max:30',
             'current_url' => 'nullable|string|max:2048',
             'referrer_url' => 'nullable|string|max:2048',
         ]);
@@ -333,6 +334,16 @@ class ChatWidgetController extends Controller
                 if ($chat->prechat_submitted_at === null) {
                     $chat->prechat_submitted_at = now();
                 }
+            }
+        }
+
+        if ($messageType === 'cnic_response') {
+            $cnic = $request->input('cnic');
+            $cnic = is_string($cnic) ? trim($cnic) : null;
+            if (! $cnic) {
+                return response()->json([
+                    'message' => 'CNIC is required.',
+                ], 422);
             }
         }
 
@@ -436,6 +447,11 @@ class ChatWidgetController extends Controller
                 'type' => 'prechat_info_response',
                 'name' => $request->customer_name,
                 'phone' => $request->phone,
+            ];
+        } elseif ($messageType === 'cnic_response') {
+            $chat_message = [
+                'type' => 'cnic_response',
+                'cnic' => trim((string) $request->input('cnic')),
             ];
         } else {
             $chat_message = $messageText;
