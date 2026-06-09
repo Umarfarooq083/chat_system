@@ -1071,8 +1071,8 @@ const filteredUnassignChatsByCompany = computed(() => {
 
 <template>
   <AuthenticatedLayout>
-    <template #header>
-      <div class="flex items-center justify-between">
+    <!-- <template #header> -->
+      <!-- <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600 text-white">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -1095,8 +1095,8 @@ const filteredUnassignChatsByCompany = computed(() => {
             Live
           </div>
         </div>
-      </div>
-    </template>
+      </div> -->
+    <!-- </template> -->
 
     <!-- Agent Load Mini Cart - Fixed Top Left -->
     <div 
@@ -1283,8 +1283,17 @@ const filteredUnassignChatsByCompany = computed(() => {
         <!-- Recent chats header -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
-            <div>Recent chats</div>
+            <div>Recent chats</div>  <div class="flex items-center gap-3">
+           <button
+             type="button"
+             class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+             @click="openCnicModal(selectedChat?.id)"
+           >
+             CNIC Lookup
+           </button>
+        </div>
           </div>
+          
         </div>
 
         <!-- Recent (open) chats list -->

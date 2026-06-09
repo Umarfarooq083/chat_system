@@ -46,13 +46,13 @@ defineProps({
             Login
           </Link>
 
-          <Link
+          <!-- <Link
             v-if="canRegister"
             :href="route('register')"
             class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white font-medium hover:from-purple-500 hover:to-pink-500 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
           >
-            Get Started
-          </Link>
+            Get Started 
+          </Link> -->
         </template>
       </nav>
     </header>
@@ -138,12 +138,12 @@ defineProps({
           </p>
 
           <div class="flex flex-wrap justify-center gap-4">
-            <Link
+            <!-- <Link
               :href="route('register')"
               class="px-8 py-3 bg-white text-purple-600 font-semibold rounded-xl hover:bg-gray-100 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
             >
               Create Free Account
-            </Link>
+            </Link> -->
             <Link
               :href="route('login')"
               class="px-8 py-3 border-2 border-white text-white font-semibold rounded-xl hover:bg-white/10 transition-all duration-300"
