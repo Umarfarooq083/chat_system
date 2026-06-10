@@ -255,6 +255,10 @@ const pingChat = async (force = false) => {
     const headers = {}
     if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
 
+    if (page.props.csrf_token) {
+      headers['X-CSRF-TOKEN'] = page.props.csrf_token
+    }
+    
     const pingUrl = apiBase ? apiBase + '/chat/ping' : '/chat/ping'
     const currentUrl = window.location.href
     if (!force && lastSentUrl === currentUrl) {
