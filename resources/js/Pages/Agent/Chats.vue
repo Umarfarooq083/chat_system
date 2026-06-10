@@ -11,6 +11,11 @@ import InputError from '@/Components/InputError.vue'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
 import { beep, setupAudioUnlock } from '../../utils/beep'
 
+import { usePage } from '@inertiajs/vue3'
+const page = usePage()
+
+
+
 const props = defineProps({
   chats: {
     type: Array,
@@ -807,7 +812,13 @@ const markChatRead = async (chatId, force = false) => {
   if (markingRead.value.has(chatId)) return
   markingRead.value.add(chatId)
   try {
-    await axios.post(`/agent/chats/${chatId}/read`)
+    // await axios.post(`/agent/chats/${chatId}/read`)
+    // New Line added for session controll and to avoid CSRF token mismatch error after session expiry. This will ensure that the CSRF token is always sent with the request.
+    await axios.post(`/agent/chats/${chatId}/read`, {}, {
+      headers: {
+        'X-CSRF-TOKEN': page.props.csrf_token
+      }
+    })
     chat.unread_count = 0
     const nowIso = new Date().toISOString()
     chat.agent_last_read_at = nowIso
