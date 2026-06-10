@@ -26,11 +26,3 @@
     </body>
 </html>
 
-
-<!-- <script
-          src="http://chat-system.test/chat-widget/embed.js"
-          data-chat-url="http://chat-system.test"
-          data-position="right"
-          data-title="Chat with us"
-          data-color="#111827">
-    </script> -->
