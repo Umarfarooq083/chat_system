@@ -2205,13 +2205,13 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
         </div>
 
-        <!-- <div class="px-4 py-4 border-b border-slate-100">
+        <div v-if="$page.props.auth.user.roles === 'Super Admin'" class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Other chats</div>
           </div>
-        </div> -->
+        </div> 
 
-        <!-- <div class="flex-1 overflow-y-auto p-2 space-y-1">
+        <div class="flex-1 overflow-y-auto p-2 space-y-1" v-if="$page.props.auth.user.roles === 'Super Admin'">
           <div
             v-for="chat in filteredGlobalChats"
             :key="chat.id"
@@ -2304,7 +2304,9 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-        </div> -->
+        </div>
+        
+        
       </aside>
     </div>
 
