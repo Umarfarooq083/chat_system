@@ -270,9 +270,14 @@ onMounted(() => {
                 <div class="text-xs text-slate-500 truncate mb-1">
                   {{ latestSnippet(chat) }}
                 </div>
-
+                
                 <div class="text-[11px] text-slate-500 whitespace-nowrap">
                   {{ formatDateTime(chat.last_message_at) }}
+                </div>
+                <div class="flex items-center gap-2 mb-0.5">
+                  <span class="text-sm text-gray-800 font-semibold">
+                   Customer: {{ chat?.customer_name }}
+                  </span>
                 </div>
               </div>
             </button>
