@@ -34,5 +34,9 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
+    'enquiry_type' => [
+        'url' => env('ENQUIRY_TYPE_API_URL'),
+        'token' => env('ENQUIRY_TYPE_API_TOKEN'),
+    ],
 
 ];
