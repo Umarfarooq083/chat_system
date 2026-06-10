@@ -1,8 +1,9 @@
 <script setup>
 import { ref, onMounted, watch, nextTick } from 'vue'
 import axios from 'axios'
+import { usePage } from '@inertiajs/vue3'
 import { extractErrorMessage } from '../utils/extractErrorMessage'
-
+const page = usePage() 
 
 const open = ref(false)
 const messages = ref([])
@@ -132,7 +133,9 @@ onMounted(async () => {
     const apiBase = cfg.apiBase || ''
     const headers = {}
     if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
-
+    if (page.props.csrf_token) {
+      headers['X-CSRF-TOKEN'] = page.props.csrf_token
+    }
     // determine URL for creating/getting chat
     const createUrl = apiBase
       ? apiBase + '/chat'
