@@ -114,7 +114,7 @@
     <div class="info-form" id="cnicForm">
         <div class="hint" style="color: #0f172a; font-weight: 600;">Please provide your CNIC:</div>
         <div class="form-row">
-            <input class="form-input" id="cnic" type="text" placeholder="CNIC" required>
+            <input class="form-input" id="cnic" type="text" inputmode="numeric" maxlength="15" autocomplete="off" placeholder="11111-1111111-1" required>
         </div>
         <div class="row" style="justify-content: flex-end; gap: 8px; padding-top:10px">
             <button class="form-btn secondary" id="cancelCnic" type="button">Cancel</button>
@@ -266,6 +266,18 @@
         if (value === null || value === undefined) return '';
         if (typeof value === 'string') return value;
         try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+    }
+
+    function formatCnic(value) {
+        const digits = (value || '').toString().replace(/\D+/g, '').slice(0, 13);
+        const first = digits.slice(0, 5);
+        const second = digits.slice(5, 12);
+        const third = digits.slice(12, 13);
+        return [first, second, third].filter(Boolean).join('-');
+    }
+
+    function handleCnicInput(event) {
+        event.target.value = formatCnic(event.target.value);
     }
 
     function toMillis(value) {
@@ -784,9 +796,14 @@
     }
 
     async function submitCnic() {
-        const cnic = (cnicEl?.value || '').toString().trim();
+        const cnic = formatCnic(cnicEl?.value || '');
+        const cnicDigits = cnic.replace(/\D+/g, '');
         if (!cnic) {
             alert('Please enter your CNIC.');
+            return;
+        }
+        if (cnicDigits.length !== 13) {
+            alert('CNIC must be 13 digits (e.g. 11111-1111111-1).');
             return;
         }
 
@@ -978,6 +995,7 @@
     cancelInfoBtn.addEventListener('click', cancelInfo);
     submitCnicBtn.addEventListener('click', submitCnic);
     cancelCnicBtn.addEventListener('click', cancelCnic);
+    cnicEl.addEventListener('input', handleCnicInput);
     if (addRegistrationNoBtn) addRegistrationNoBtn.addEventListener('click', addRegistrationInput);
 
     textEl.addEventListener('input', updateSendButton);
