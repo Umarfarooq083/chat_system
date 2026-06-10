@@ -119,6 +119,19 @@ const cnicLookupResults = ref({})
 const cnicFetchLoading = ref({})
 const cnicSendLoading = ref({})
 
+const formatCnic = (value) => {
+  const digits = (value || '').toString().replace(/\D+/g, '').slice(0, 13)
+  const first = digits.slice(0, 5)
+  const second = digits.slice(5, 12)
+  const third = digits.slice(12, 13)
+
+  return [first, second, third].filter(Boolean).join('-')
+}
+
+const onCnicInput = (event) => {
+  cnicInput.value = formatCnic(event.target.value)
+}
+
 const showTransferModal = ref(false)
 const transferLoading = ref(false)
 const selectedTransferChat = ref(null)
@@ -238,7 +251,7 @@ const submitCnicLookup = async () => {
 
   cnicSubmitting.value = true
   try {
-    const response = await axios.post('/agent/cnic/lookup', { cnic: cnicInput.value })
+    const response = await axios.post('/agent/cnic/lookup', { cnic: formatCnic(cnicInput.value) })
     cnicResult.value = response?.data ?? null
     cnicInput.value = null
   } catch (e) {
@@ -1162,7 +1175,11 @@ const filteredUnassignChatsByCompany = computed(() => {
             v-model="cnicInput"
             type="text"
             class="mt-1 block w-full"
-            placeholder="11111-111111-1"
+            inputmode="numeric"
+            maxlength="15"
+            autocomplete="off"
+            placeholder="11111-1111111-1"
+            @input="onCnicInput"
             @keyup.enter="submitCnicLookup"
           />
           <InputError :message="cnicError" class="mt-2" />

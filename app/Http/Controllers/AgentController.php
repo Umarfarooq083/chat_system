@@ -901,13 +901,23 @@ class AgentController extends Controller
 
     private function addBootstrap4($html)
     {
-        $bootstrapCss = '<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">';
+        $bootstrapCss = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.7/dist/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">';
         $viewport = '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">';
 
         if (strpos($html, '<head>') !== false) {
             $html = str_replace('<head>', '<head>'.$viewport.$bootstrapCss, $html);
         } else {
-            $html = '<head>'.$viewport.$bootstrapCss.'</head>'.$html;
+            $html = '<head>'.$viewport.$bootstrapCss.'</head><style>
+            .tfooter strong{
+            color: white !important;
+            }
+
+            @media print{
+            .tfooter strong{
+            color: unset !important;
+            }
+            }
+            </style>'.$html;
         }
         if (strpos($html, '<div class="container') === false) {
             if (preg_match('/<body[^>]*>(.*?)<\/body>/is', $html, $matches)) {

@@ -88,6 +88,19 @@ const formatTime = (timestamp) => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+const formatCnic = (value) => {
+  const digits = (value || '').toString().replace(/\D+/g, '').slice(0, 13)
+  const first = digits.slice(0, 5)
+  const second = digits.slice(5, 12)
+  const third = digits.slice(12, 13)
+
+  return [first, second, third].filter(Boolean).join('-')
+}
+
+const onCnicInput = (event) => {
+  cnicForm.value.cnic = formatCnic(event.target.value)
+}
+
 const toMillis = (value) => {
   if (!value) return null
   const ts = new Date(value).getTime()
@@ -502,9 +515,14 @@ const submitUserInfo = async () => {
 const submitCnic = async () => {
   if (!chatId) return
 
-  const cnic = (cnicForm.value.cnic || '').toString().trim()
+  const cnic = formatCnic(cnicForm.value.cnic)
+  const cnicDigits = cnic.replace(/\D+/g, '')
   if (!cnic) {
     sendError.value = 'Please enter your CNIC.'
+    return
+  }
+  if (cnicDigits.length !== 13) {
+    sendError.value = 'CNIC must be 13 digits (e.g. 11111-1111111-1).'
     return
   }
 
@@ -805,8 +823,12 @@ const removeRegistration = (index) => {
               v-model="cnicForm.cnic"
               type="text"
               required
-              placeholder="CNIC"
+              inputmode="numeric"
+              maxlength="15"
+              autocomplete="off"
+              placeholder="11111-1111111-1"
               class="form-control form-control-sm"
+              @input="onCnicInput"
             />
           </div>
 
@@ -858,11 +880,11 @@ const removeRegistration = (index) => {
             <i class="fa fa-paperclip"></i>
           </button>
 
-          <!-- <input v-model="message" type="text" placeholder="Type a message..."
+          <input v-model="message" type="text" placeholder="Type a message..."
             class="form-control rounded-5"
-            :disabled="showPrechatForm || chatClosed" /> -->
+            :disabled="showPrechatForm || chatClosed" />
 
-           <textarea v-model="message"
+           <!-- <textarea v-model="message"
               @input="autoResize"
               ref="textareaRef"
               placeholder="Type a message..."
@@ -870,7 +892,7 @@ const removeRegistration = (index) => {
               rows="1"
               style="overflow:hidden; resize:none;"
               :disabled="showPrechatForm || chatClosed">
-          </textarea>
+          </textarea> -->
 
           <button type="submit"
             class="btn btn-primary btn-sm rounded-5 px-3"
