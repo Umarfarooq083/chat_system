@@ -498,8 +498,8 @@ class AgentController extends Controller
 
         $response = Http::withHeaders([
             'accept' => 'text/plain',
-            'Authorization' => env('ENQUIRY_TYPE_API_TOKEN'),
-        ])->get(env('ENQUIRY_TYPE_API_URL'), [
+            'Authorization' => config('services.enquiry_type.token'),
+        ])->get(config('services.enquiry_type.url'), [
             'AppDateTime' => date('Y-m-d'),
         ]);
         $apiData = $response->json();
