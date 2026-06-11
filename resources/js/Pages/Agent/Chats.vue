@@ -10,6 +10,7 @@ import InputLabel from '@/Components/InputLabel.vue'
 import InputError from '@/Components/InputError.vue'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
 import { beep, setupAudioUnlock } from '../../utils/beep'
+import Pagination from '@/Components/Pagination.vue'
 
 import { usePage } from '@inertiajs/vue3'
 const page = usePage()
@@ -333,7 +334,7 @@ const updateOnlineFlags = () => {
 };
 
 onMounted(() => {
-  chats.value = props.chats || []
+  chats.value = props.chats?.data || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
   fetchAgentLoad()
@@ -363,7 +364,7 @@ onBeforeUnmount(() => {
 
 watch(() => props.chats, (newChats) => {
   if (newChats) {
-    chats.value = newChats
+    chats.value = newChats.data
   }
 }, { immediate: true, deep: true })
 
@@ -900,7 +901,6 @@ onMounted(() => {
         chats.value.unshift(e.chat)
         updateOnlineFlags()
       }
-      console.log(e,'first chat')
       subscribeToChat(e.chat.id)
     })
     .error((error) => console.error('Error subscribing to newChats channel:', error))
@@ -1443,6 +1443,9 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
+        </div>
+        <div class="px-2 py-2 border-t border-slate-100">
+            <Pagination :links="props.chats.links" />
         </div>
 
         <!-- Previous chats header -->

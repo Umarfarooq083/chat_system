@@ -90,7 +90,7 @@ class AgentController extends Controller
             report($e);
 
             return response()->json([
-                'message' => 'CNIC lookup failed.'.$e->getMessage(),
+                'message' => 'CNIC lookup failed.' . $e->getMessage(),
             ], 500);
         }
     }
@@ -128,9 +128,10 @@ class AgentController extends Controller
             ->whereIn('company_id', $CompanyUUID->toArray())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
-            ->get();
+            ->paginate(100);
 
-        $chats->each->append('is_online');
+        $chats->getCollection()->each->append('is_online');
+
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
             'auth_user' => auth()->user(),
@@ -184,7 +185,7 @@ class AgentController extends Controller
             ->groupBy('assigned_agent_id')
             ->select('assigned_agent_id', DB::raw('COUNT(*) as active_open'))
             ->pluck('active_open', 'assigned_agent_id');
-// $payload = $agents->map(function ($agent) use ($openCounts, $activeCounts) {
+        // $payload = $agents->map(function ($agent) use ($openCounts, $activeCounts) {
         $payload = $agents->map(function ($agent) use ($activeCounts) {
             return [
                 'id' => $agent->id,
@@ -245,7 +246,7 @@ class AgentController extends Controller
                 }
                 $q->where('company_id', $companyId);
             })
-            ->where('status', 'close') 
+            ->where('status', 'close')
             ->when(! empty($validated['assigned'] ?? null) && $validated['assigned'] !== 'any', function ($q) use ($validated) {
                 if ($validated['assigned'] === 'me') {
                     $q->where('assigned_agent_id', auth()->id());
@@ -255,8 +256,8 @@ class AgentController extends Controller
                     $q->whereNull('assigned_agent_id');
                 }
             })
-            ->when(! empty($validated['from'] ?? null), fn ($q) => $q->whereDate('last_message_at', '>=', $validated['from']))
-            ->when(! empty($validated['to'] ?? null), fn ($q) => $q->whereDate('last_message_at', '<=', $validated['to']))
+            ->when(! empty($validated['from'] ?? null), fn($q) => $q->whereDate('last_message_at', '>=', $validated['from']))
+            ->when(! empty($validated['to'] ?? null), fn($q) => $q->whereDate('last_message_at', '<=', $validated['to']))
             ->when(! empty($validated['search'] ?? null), function ($q) use ($validated) {
                 $term = trim((string) $validated['search']);
                 if ($term === '') {
@@ -557,7 +558,7 @@ class AgentController extends Controller
             'Authorization' => '6XesrAM2Nu',
             'Content-Type' => 'application/json',
         ])->post(
-            $url.'?AppDateTime='.now()->toDateString(),
+            $url . '?AppDateTime=' . now()->toDateString(),
             $payload
         );
 
@@ -685,21 +686,21 @@ class AgentController extends Controller
             'company_id' => ['required', 'string', 'exists:companies,uuid'],
         ]);
         $company = Company::query()
-        ->where('uuid', $validated['company_id'])
-        ->firstOrFail();
-        
+            ->where('uuid', $validated['company_id'])
+            ->firstOrFail();
+
         $hasAccess = DB::table('company_user')
-        ->where('company_id', $company->id)
-        ->pluck('user_id');
-        
+            ->where('company_id', $company->id)
+            ->pluck('user_id');
+
         $users = DB::table('users')
-        ->where('users.id', '!=', auth()->id())
-        ->whereIn('users.id', $hasAccess)
-        ->select('users.id', 'users.name', 'users.email')
-        ->distinct()
-        ->orderBy('users.name')
-        ->get();
-      
+            ->where('users.id', '!=', auth()->id())
+            ->whereIn('users.id', $hasAccess)
+            ->select('users.id', 'users.name', 'users.email')
+            ->distinct()
+            ->orderBy('users.name')
+            ->get();
+
         return response()->json([
             'users' => $users->toArray(),
         ]);
@@ -770,9 +771,9 @@ class AgentController extends Controller
                 if ($safeReg === '') {
                     $safeReg = 'registration';
                 }
-                $fileName = 'external-html-'.$safeReg.'-'.(string) Str::uuid().'.html';
-                $dir = 'external-api/'.$chat->id;
-                $htmlPath = $dir.'/'.$fileName;
+                $fileName = 'external-html-' . $safeReg . '-' . (string) Str::uuid() . '.html';
+                $dir = 'external-api/' . $chat->id;
+                $htmlPath = $dir . '/' . $fileName;
                 Storage::disk('public')->put($htmlPath, $decodedHtml);
                 $payload = [
                     'html_path' => $htmlPath,
@@ -863,9 +864,9 @@ class AgentController extends Controller
                 $safeReg = 'registration';
             }
 
-            $fileName = 'external-html-'.$safeReg.'-'.(string) Str::uuid().'.html';
-            $dir = 'chat-attachments/'.$chat->id;
-            $path = $dir.'/'.$fileName;
+            $fileName = 'external-html-' . $safeReg . '-' . (string) Str::uuid() . '.html';
+            $dir = 'chat-attachments/' . $chat->id;
+            $path = $dir . '/' . $fileName;
             Storage::disk('public')->put($path, $html);
 
             $message = Message::create([
@@ -905,9 +906,9 @@ class AgentController extends Controller
         $viewport = '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">';
 
         if (strpos($html, '<head>') !== false) {
-            $html = str_replace('<head>', '<head>'.$viewport.$bootstrapCss, $html);
+            $html = str_replace('<head>', '<head>' . $viewport . $bootstrapCss, $html);
         } else {
-            $html = '<head>'.$viewport.$bootstrapCss.'</head><style>
+            $html = '<head>' . $viewport . $bootstrapCss . '</head><style>
             .tfooter strong{
             color: white !important;
             }
@@ -917,15 +918,15 @@ class AgentController extends Controller
             color: unset !important;
             }
             }
-            </style>'.$html;
+            </style>' . $html;
         }
         if (strpos($html, '<div class="container') === false) {
             if (preg_match('/<body[^>]*>(.*?)<\/body>/is', $html, $matches)) {
                 $bodyContent = $matches[1];
-                $wrappedContent = '<div class="container mt-3">'.$bodyContent.'</div>';
+                $wrappedContent = '<div class="container mt-3">' . $bodyContent . '</div>';
                 $html = str_replace($bodyContent, $wrappedContent, $html);
             } else {
-                $html = '<div class="container mt-3">'.$html.'</div>';
+                $html = '<div class="container mt-3">' . $html . '</div>';
             }
         }
 
@@ -988,34 +989,34 @@ class AgentController extends Controller
                         THEN chats.id 
                     END) as user_replied_users
                 "),
-                DB::raw("
+                    DB::raw("
                 COUNT(DISTINCT CASE 
                         WHEN messages.attachments IS NOT NULL 
                             AND messages.attachments != ''
                         THEN messages.id 
                     END) as attachments_count
                 "),
-                DB::raw("
+                    DB::raw("
                     COUNT(DISTINCT CASE 
                         WHEN chats.status = 'open' 
                         THEN chats.id 
                     END) as open_chats_count
                 "),
 
-                DB::raw("
+                    DB::raw("
                     COUNT(DISTINCT CASE 
                         WHEN chats.status = 'close' 
                         THEN chats.id 
                     END) as close_chats_count
                 "),
-                DB::raw("
+                    DB::raw("
                     COUNT(DISTINCT CASE 
                         WHEN chats.status = 'close'
                             AND chat_feedbacks.chat_id IS NOT NULL
                         THEN chats.id 
                     END) as proper_complete_code
                 "),
-                DB::raw("
+                    DB::raw("
                     COUNT(DISTINCT CASE 
                         WHEN chats.status = 'close'
                             AND chat_feedbacks.chat_id IS NULL
@@ -1059,7 +1060,7 @@ class AgentController extends Controller
             ->orderBy('date', 'desc')
             ->get();
 
-        $fileName = 'chat_reports_'.date('Y-m-d').'.csv';
+        $fileName = 'chat_reports_' . date('Y-m-d') . '.csv';
         $headers = [
             'Content-type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=$fileName",
@@ -1165,7 +1166,7 @@ class AgentController extends Controller
 
                     continue;
                 }
-                
+
                 $responseTime = $firstAgent->created_at->getTimestamp() - $firstVisitor->created_at->getTimestamp();
                 if ($responseTime >= 120) {
                     $delayedChats[] = [
@@ -1215,7 +1216,7 @@ class AgentController extends Controller
         $items = $items instanceof Collection ? $items : collect($items);
         $options = [
             'path' => request()->url(),
-            'query' => request()->query(), 
+            'query' => request()->query(),
         ];
         return new LengthAwarePaginator(
             $items->forPage($page, $perPage),
@@ -1225,7 +1226,4 @@ class AgentController extends Controller
             $options
         );
     }
-
-
-
 }
