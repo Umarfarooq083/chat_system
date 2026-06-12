@@ -126,6 +126,11 @@ class AgentController extends Controller
             ->with('companyRel')
             ->where('last_message_at', '>=', now()->subHours(24))
             ->whereIn('company_id', $CompanyUUID->toArray())
+            ->where(function ($query) {
+                $query
+                    ->where('assigned_agent_id', auth()->id())
+                    ->orWhereNull('assigned_agent_id');
+            })
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->paginate(100);
@@ -405,6 +410,11 @@ class AgentController extends Controller
                 },
             ])
             ->whereIn('company_id', $CompanyUUID->toArray())
+            ->where(function ($query) {
+                $query
+                    ->where('assigned_agent_id', auth()->id())
+                    ->orWhereNull('assigned_agent_id');
+            })
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();

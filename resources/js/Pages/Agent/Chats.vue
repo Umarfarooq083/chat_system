@@ -10,7 +10,7 @@ import InputLabel from '@/Components/InputLabel.vue'
 import InputError from '@/Components/InputError.vue'
 import { extractErrorMessage } from '../../utils/extractErrorMessage'
 import { beep, setupAudioUnlock } from '../../utils/beep'
-import Pagination from '@/Components/Pagination.vue'
+import Pagination from '@/Components/ChatPagination.vue'
 
 import { usePage } from '@inertiajs/vue3'
 const page = usePage()
@@ -909,7 +909,7 @@ onMounted(() => {
 
 
 const filteredOpenChats = computed(() => {
-  return chats.value.filter(chat => chat?.assigned_agent_id !== null && chat?.status === 'open');
+  return chats.value.filter(chat => chat?.assigned_agent_id === props.auth_user?.id && chat?.status === 'open');
 });
 
 const showAgentLoadModal = ref(false)
@@ -1443,10 +1443,11 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-        </div>
-        <div class="px-2 py-2 border-t border-slate-100">
+          <div class="px-2 py-2 border-t border-slate-100">
             <Pagination :links="props.chats.links" />
         </div>
+        </div>
+        
 
         <!-- Previous chats header -->
         <!-- <div class="px-4 py-4 border-b border-slate-100">
@@ -2118,7 +2119,7 @@ const filteredUnassignChatsByCompany = computed(() => {
             <div>Unassign chats</div>
             <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              {{ chats.filter(c => c.is_online).length }} online
+              {{ filteredUnassignChatsByCompany.filter(c => c.is_online).length }} online
             </div>
           </div>
         </div>
@@ -2206,9 +2207,12 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
+          <div class="px-2 py-2 border-t border-slate-100">
+            <Pagination :links="props.chats.links" />
+        </div>
         </div>
 
-        <div v-if="$page.props.auth.user.roles === 'Super Admin'" class="px-4 py-4 border-b border-slate-100">
+        <!-- <div v-if="$page.props.auth.user.roles === 'Super Admin'" class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Other chats</div>
           </div>
@@ -2307,7 +2311,7 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-        </div>
+        </div> -->
         
         
       </aside>

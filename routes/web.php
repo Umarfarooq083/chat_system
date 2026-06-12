@@ -48,6 +48,8 @@ Route::get('/chat-widget', [ChatWidgetController::class, 'page'])->name('chat-wi
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/agent/chats', [AgentController::class, 'index'])->name('agent.chats');
+    Route::get('/agent/chats/current', [AgentController::class, 'currentUserChats'])->name('agent.chats.current');
+    Route::get('/agent/chats/unassigned', [AgentController::class, 'unassignedChats'])->name('agent.chats.unassigned');
     Route::get('/agent/chats/history', [AgentController::class, 'history'])->name('agent.chats.history');
     Route::get('/agent/chats/history/{chat}', [AgentController::class, 'historyShow'])->name('agent.chats.history.show');
     Route::get('/agent/chats/history/{chat}/messages', [AgentController::class, 'historyMessages'])->name('agent.chats.history.messages');
