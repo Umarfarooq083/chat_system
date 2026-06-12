@@ -518,7 +518,7 @@
             broadcaster: 'pusher',
             key: @json(env('REVERB_APP_KEY', 'local')),
             cluster: 'local',
-            wsHost: @json(env('REVERB_HOST', window.location.hostname)),
+            wsHost: @json(env('REVERB_HOST')) || window.location.hostname,
             wsPort: @json(env('REVERB_PORT', 8081)),
             wssPort: @json(env('REVERB_PORT', 8081)),
             wsScheme: @json(env('REVERB_SCHEME', 'http')) === 'https' ? 'wss' : 'ws',
