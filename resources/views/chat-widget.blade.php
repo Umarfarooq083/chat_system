@@ -133,6 +133,7 @@
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/laravel-echo@2.3.0/dist/echo.min.js"></script>
 <script src="https://js.pusher.com/8.4/pusher.min.js"></script>
 
 <script>
@@ -182,7 +183,6 @@
 
     let chatId = null;
     let lastId = 0;
-    let pusher = null;
     let channelSubscription = null;
     let renderedMessageIds = new Set();
     let showPrechatForm = false;
@@ -481,7 +481,7 @@
         setChatClosed((data.chat?.status || '') === 'close');
         scrollToBottom();
 
-        initPusher();
+        initEcho();
         subscribeToChatChannel(chatId);
     }
 
@@ -509,30 +509,38 @@
         }
     }
 
-    function initPusher() {
-        if (pusher) return;
+    function initEcho() {
+        if (window.Echo) return;
         
         Pusher.logToConsole = false;
         
-        pusher = new Pusher(@json(env('PUSHER_APP_KEY')), {
-            cluster: @json(env('PUSHER_APP_CLUSTER')),
-            encrypted: true,
-            forceTLS: true
+        window.Echo = new Echo({
+            broadcaster: 'pusher',
+            key: @json(env('REVERB_APP_KEY', 'local')),
+            cluster: 'local',
+            wsHost: @json(env('REVERB_HOST', window.location.hostname)),
+            wsPort: @json(env('REVERB_PORT', 6001)),
+            wssPort: @json(env('REVERB_PORT', 6001)),
+            wsScheme: @json(env('REVERB_SCHEME', 'http')) === 'https' ? 'wss' : 'ws',
+            forceTLS: false,
+            encrypted: false,
+            disableStats: true,
+            enabledTransports: ['ws', 'wss'],
         });
     }
-
+    
     function subscribeToChatChannel(cId) {
-        if (!pusher || !cId) return;
+        if (!window.Echo || !cId) return;
         
         // Unsubscribe from previous channel if exists
         if (channelSubscription) {
-            pusher.unsubscribe('chat.' + channelSubscription);
+            window.Echo.leave('chat.' + channelSubscription);
         }
         
         channelSubscription = cId;
-        const channel = pusher.subscribe('chat.' + cId);
+        const channel = window.Echo.channel('chat.' + cId);
         
-        channel.bind('App\\Events\\MessageSent', function(data) {
+        channel.listen('App\\Events\\MessageSent', function(data) {
             const message = data.message;
             if (message && Number(message.id || 0) > lastId) {
                 renderMessage(message);
@@ -562,7 +570,7 @@
                 scrollToBottom();
             }
         });
-        channel.bind('App\\Events\\ChatReadUpdated', function(data) {
+        channel.listen('App\\Events\\ChatReadUpdated', function(data) {
             if (data.agentLastReadAt) agentLastReadAt = data.agentLastReadAt;
             if (data.visitorLastReadAt) visitorLastReadAt = data.visitorLastReadAt;
             if (data.readerType === 'agent') refreshVisitorTicks();

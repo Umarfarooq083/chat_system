@@ -12,9 +12,16 @@ window.axios.defaults.xsrfHeaderName = 'X-XSRF-TOKEN';
 window.Pusher = Pusher;
 window.Echo = new Echo({
     broadcaster: 'pusher',
-    key: import.meta.env.VITE_PUSHER_APP_KEY,
-    cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
-    forceTLS: true
+    key: import.meta.env.VITE_REVERB_APP_KEY ?? 'local',
+    cluster: 'local',
+    wsHost: import.meta.env.VITE_REVERB_HOST ?? window.location.hostname,
+    wsPort: import.meta.env.VITE_REVERB_PORT ?? 6001,
+    wssPort: import.meta.env.VITE_REVERB_PORT ?? 6001,
+    wsScheme: import.meta.env.VITE_REVERB_SCHEME === 'https' ? 'wss' : 'ws',
+    forceTLS: false,
+    encrypted: false,
+    disableStats: true,
+    enabledTransports: ['ws', 'wss'],
 });
 
 
