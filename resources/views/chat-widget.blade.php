@@ -133,8 +133,8 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/laravel-echo@2.3.0/dist/echo.min.js"></script>
 <script src="https://js.pusher.com/8.4/pusher.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/laravel-echo@2.3.0/dist/echo.iife.js"></script>
 
 <script>
 (() => {
@@ -194,6 +194,7 @@
     let agentLastReadAt = null;
     let visitorLastReadAt = null;
     let chatClosed = false;
+    let messagePollTimer = null;
 
     function getRegistrationNumbers() {
         if (!registrationNoListEl) return [];
@@ -510,11 +511,20 @@
     }
 
     function initEcho() {
-        if (window.Echo) return;
+        if (window.Echo && typeof window.Echo.channel === 'function') return true;
+        const EchoConstructor = window.Echo?.default || window.Echo || window.LaravelEcho || (typeof Echo !== 'undefined' ? Echo : null);
+        if (!EchoConstructor) {
+            console.error('Laravel Echo was not loaded.');
+            return false;
+        }
+        if (!window.Pusher) {
+            console.error('Pusher JS was not loaded.');
+            return false;
+        }
         
-        Pusher.logToConsole = false;
+        window.Pusher.logToConsole = false;
         
-        window.Echo = new Echo({
+        window.Echo = new EchoConstructor({
             broadcaster: 'pusher',
             key: @json(env('REVERB_APP_KEY', 'local')),
             cluster: 'local',
@@ -527,9 +537,71 @@
             disableStats: true,
             enabledTransports: ['ws', 'wss'],
         });
+
+        return true;
+    }
+
+    async function fetchNewMessages() {
+        if (!chatId) return;
+        try {
+            const params = new URLSearchParams({
+                visitor_id: visitorId,
+                chat_id: String(chatId),
+                after_id: String(lastId),
+                limit: '30',
+            });
+            const response = await fetch(`${apiBase}/messages?${params.toString()}`);
+            if (!response.ok) return;
+            const data = await response.json();
+            let receivedAgentMessage = false;
+            (data.messages || []).forEach((message) => {
+                if (!message || Number(message.id || 0) <= lastId) return;
+                handleIncomingMessage(message);
+                if (message.sender_type === 'agent') receivedAgentMessage = true;
+            });
+            if (receivedAgentMessage) {
+                markVisitorRead();
+            }
+        } catch (e) {
+            // Polling is a fallback, so keep it quiet unless the browser devtools are open.
+            console.debug('Message polling failed', e);
+        }
+    }
+
+    function startMessagePolling() {
+        if (messagePollTimer) return;
+        messagePollTimer = setInterval(fetchNewMessages, 5000);
+    }
+
+    function handleIncomingMessage(message) {
+        if (message && Number(message.id || 0) > lastId) {
+            renderMessage(message);
+            lastId = Math.max(lastId, Number(message.id || 0));
+            if (message.message_type === 'user_info_request') {
+                showUserForm = true;
+            }
+            if (message.message_type === 'user_info_response' && message.sender_type === 'visitor') {
+                showUserForm = false;
+            }
+            if (message.message_type === 'cnic_request') {
+                showCnicForm = true;
+            }
+            if (message.message_type === 'cnic_response' && message.sender_type === 'visitor') {
+                showCnicForm = false;
+            }
+            if (message.message_type === 'prechat_info_request') {
+                showPrechatForm = true;
+            }
+            if (message.message_type === 'prechat_info_response' && message.sender_type === 'visitor') {
+                showPrechatForm = false;
+            }
+            updateFormVisibility();
+            scrollToBottom();
+        }
     }
     
     function subscribeToChatChannel(cId) {
+        startMessagePolling();
         if (!window.Echo || !cId) return;
         
         // Unsubscribe from previous channel if exists
@@ -540,37 +612,16 @@
         channelSubscription = cId;
         const channel = window.Echo.channel('chat.' + cId);
         
-        channel.listen('App\\Events\\MessageSent', function(data) {
+        channel.listen('MessageSent', function(data) {
             const message = data.message;
-            if (message && Number(message.id || 0) > lastId) {
-                renderMessage(message);
-                lastId = Math.max(lastId, Number(message.id || 0));
-                if (message.message_type === 'user_info_request') {
-                    showUserForm = true;
-                }
-                if (message.message_type === 'user_info_response' && message.sender_type === 'visitor') {
-                    showUserForm = false;
-                }
-                if (message.message_type === 'cnic_request') {
-                    showCnicForm = true;
-                }
-                if (message.message_type === 'cnic_response' && message.sender_type === 'visitor') {
-                    showCnicForm = false;
-                }
-                if (message.message_type === 'prechat_info_request') {
-                    showPrechatForm = true;
-                }
-                if (message.message_type === 'prechat_info_response' && message.sender_type === 'visitor') {
-                    showPrechatForm = false;
-                }
+            if (message) {
+                handleIncomingMessage(message);
                 if (message.sender_type === 'agent') {
                     markVisitorRead();
                 }
-                updateFormVisibility();
-                scrollToBottom();
             }
         });
-        channel.listen('App\\Events\\ChatReadUpdated', function(data) {
+        channel.listen('ChatReadUpdated', function(data) {
             if (data.agentLastReadAt) agentLastReadAt = data.agentLastReadAt;
             if (data.visitorLastReadAt) visitorLastReadAt = data.visitorLastReadAt;
             if (data.readerType === 'agent') refreshVisitorTicks();

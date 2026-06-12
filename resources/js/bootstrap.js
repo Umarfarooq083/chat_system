@@ -10,33 +10,49 @@ window.axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('m
 window.axios.defaults.xsrfCookieName = 'XSRF-TOKEN';
 window.axios.defaults.xsrfHeaderName = 'X-XSRF-TOKEN';
 window.Pusher = Pusher;
+window.Echo = new Echo({
+    broadcaster: 'pusher',
+    key: import.meta.env.VITE_REVERB_APP_KEY ?? 'local',
+    cluster: 'local',
+    wsHost: import.meta.env.VITE_REVERB_HOST ?? window.location.hostname,
+    wsPort: import.meta.env.VITE_REVERB_PORT ?? 6001,
+    wssPort: import.meta.env.VITE_REVERB_PORT ?? 6001,
+    wsScheme: import.meta.env.VITE_REVERB_SCHEME === 'https' ? 'wss' : 'ws',
+    forceTLS: false,
+    encrypted: false,
+    disableStats: true,
+    enabledTransports: ['ws', 'wss'],
+});
+
+
+
 // window.Echo = new Echo({
-//     broadcaster: 'pusher',
-//     key: import.meta.env.VITE_REVERB_APP_KEY ?? 'local',
-//     cluster: 'local',
+//     broadcaster: 'reverb',
+//     key: import.meta.env.VITE_REVERB_APP_KEY,
+
 //     wsHost: import.meta.env.VITE_REVERB_HOST ?? window.location.hostname,
-//     wsPort: import.meta.env.VITE_REVERB_PORT ?? 6001,
-//     wssPort: import.meta.env.VITE_REVERB_PORT ?? 6001,
-//     wsScheme: import.meta.env.VITE_REVERB_SCHEME === 'https' ? 'wss' : 'ws',
-//     forceTLS: false,
-//     encrypted: false,
+//     wsPort: 8443,
+//     wssPort: 8443,
+
+//     forceTLS: true,
+//     encrypted: true,
+
 //     disableStats: true,
 //     enabledTransports: ['ws', 'wss'],
 // });
 
 
+// window.Echo = new Echo({
+//     broadcaster: 'pusher',
+//     key: @json(env('REVERB_APP_KEY')),
+//     cluster: 'mt1',
 
-window.Echo = new Echo({
-    broadcaster: 'reverb',
-    key: import.meta.env.VITE_REVERB_APP_KEY,
+//     wsHost: @json(env('REVERB_HOST')),
+//     wsPort: @json(env('REVERB_PORT')),
+//     wssPort: @json(env('REVERB_PORT')),
 
-    wsHost: import.meta.env.VITE_REVERB_HOST ?? window.location.hostname,
-    wsPort: 8443,
-    wssPort: 8443,
+//     forceTLS: true,
+//     encrypted: true,
 
-    forceTLS: true,
-    encrypted: true,
-
-    disableStats: true,
-    enabledTransports: ['ws', 'wss'],
-});
+//     enabledTransports: ['ws', 'wss'],
+// });
