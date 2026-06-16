@@ -1,6 +1,6 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
-import Pagination from '@/Components/Pagination.vue'
+import Pagination from '@/Components/ChatPagination.vue'
 import { router } from '@inertiajs/vue3'
 import axios from 'axios'
 import { computed, onMounted, reactive, ref } from 'vue'

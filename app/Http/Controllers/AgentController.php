@@ -126,16 +126,28 @@ class AgentController extends Controller
             ->with('companyRel')
             ->where('last_message_at', '>=', now()->subHours(24))
             ->whereIn('company_id', $CompanyUUID->toArray())
+            // ->where(function ($query) {
+            //     $query
+            //         ->where('assigned_agent_id', auth()->id())
+            //         ->orWhereNull('assigned_agent_id');
+            // })
+
             ->where(function ($query) {
-                $query
-                    ->where('assigned_agent_id', auth()->id())
-                    ->orWhereNull('assigned_agent_id');
+                $query->where('assigned_agent_id', auth()->id())
+                    ->orWhere(function ($q) {
+                        $q->whereNull('assigned_agent_id')
+                            ->whereHas('messages', function ($msg) {
+                                $msg->where('sender_type', 'visitor');
+                            });
+                    });
             })
+
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
-            ->paginate(100);
+            ->get();
+            // ->paginate(100);
 
-        $chats->getCollection()->each->append('is_online');
+        $chats->each->append('is_online');
 
         return Inertia::render('Agent/Chats', [
             'chats' => $chats,
@@ -433,7 +445,7 @@ class AgentController extends Controller
             'limit' => 'nullable|integer|min:1|max:100',
         ]);
 
-        $limit = $validated['limit'] ?? 10;
+        $limit = auth()->user()->message_per_page ?? 25;
 
         // fetch latest N, then reverse for chronological display
         $messages = $chat
@@ -945,6 +957,13 @@ class AgentController extends Controller
 
     /**
      * Display chat system reports and analytics.
+     * Total Visits => Total number of chats initiated within the current date or selected date range
+     * Users Engaged => Total number of user who sent at least one message within the current date or selected date range
+     * Active Chats => A user who visit our site and still have open chat within the current date or selected date range (doestn't matter the chat is initiated or Not)
+     * Unassigned Chats => Total number of chats that user sent a message and not assigned to any agent within the current date or selected date range
+     * Chats by Status => Open Chat mean user sent atleast one message to agent 
+     * Chats by Status => Close chat mean user sent a  message and his requirnment is comoleted and agent close that chat
+     * 
      */
     public function reports(Request $request)
     {
@@ -969,9 +988,19 @@ class AgentController extends Controller
             })->count(),
 
             'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status', 'open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
-            'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
+            // 'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
+            'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)
+                ->whereBetween('created_at', [$from, $to])
+                ->whereNull('assigned_agent_id')
+                ->whereHas('messages', function ($q) {
+                    $q->where('sender_type', 'visitor');
+                })
+                ->count(),
             'chats_by_status' => Chat::byCompanyUuid($selectedCompany)->select('status', DB::raw('count(*) as count'))
                 ->whereBetween('created_at', [$from, $to])
+                ->whereHas('messages', function ($q) {
+                    $q->where('sender_type', 'visitor');
+                })
                 ->groupBy('status')
                 ->get(),
             'agent_concurrency' => DB::table('chats')

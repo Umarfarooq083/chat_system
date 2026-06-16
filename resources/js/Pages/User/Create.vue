@@ -13,6 +13,7 @@ const props = defineProps({
 const form = ref({
     name: '',
     email: '',
+    message_per_page: 10,
     password: '',
     company_ids: [],
 });
@@ -76,6 +77,19 @@ function submit() {
                                     :class="errors.email ? 'border-red-300' : ''"
                                 />
                                 <p v-if="errors.email" class="mt-1 text-sm text-red-600">{{ errors.email }}</p>
+                            </div>
+                            
+                            <div>
+                                <label for="message_per_page" class="block text-sm font-medium text-gray-700">Messages Per Page *</label>
+                                <input
+                                    type="number"
+                                    id="message_per_page"
+                                    v-model="form.message_per_page"
+                                    required
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                    :class="errors.message_per_page ? 'border-red-300' : ''"
+                                />
+                                <p v-if="errors.message_per_page" class="mt-1 text-sm text-red-600">{{ errors.message_per_page }}</p>
                             </div>
 
                             <div>

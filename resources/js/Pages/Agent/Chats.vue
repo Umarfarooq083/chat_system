@@ -334,7 +334,8 @@ const updateOnlineFlags = () => {
 };
 
 onMounted(() => {
-  chats.value = props.chats?.data || []
+  // chats.value = props.chats?.data || []
+  chats.value = props.chats || []
   updateOnlineFlags()
   onlineFlagsIntervalId = setInterval(updateOnlineFlags, 30000)
   fetchAgentLoad()
@@ -364,7 +365,8 @@ onBeforeUnmount(() => {
 
 watch(() => props.chats, (newChats) => {
   if (newChats) {
-    chats.value = newChats.data
+    // chats.value = newChats.data
+    chats.value = newChats
   }
 }, { immediate: true, deep: true })
 
@@ -1443,9 +1445,9 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-          <div class="px-2 py-2 border-t border-slate-100">
+          <!-- <div class="px-2 py-2 border-t border-slate-100">
             <Pagination :links="props.chats.links" />
-        </div>
+        </div> -->
         </div>
         
 
@@ -2207,9 +2209,9 @@ const filteredUnassignChatsByCompany = computed(() => {
               </button>
             </div>
           </div>
-          <div class="px-2 py-2 border-t border-slate-100">
+          <!-- <div class="px-2 py-2 border-t border-slate-100">
             <Pagination :links="props.chats.links" />
-        </div>
+        </div> -->
         </div>
 
         <!-- <div v-if="$page.props.auth.user.roles === 'Super Admin'" class="px-4 py-4 border-b border-slate-100">
