@@ -428,6 +428,7 @@ class ChatWidgetController extends Controller
                     foreach ($createdMessages as $created) {
                         broadcast(new MessageSent($created));
                     }
+                    broadcast(new NewChat($chat));
 
                     return response()->json([
                         'message' => $this->serializeMessage($last),
@@ -483,6 +484,9 @@ class ChatWidgetController extends Controller
         $chat->save();
 
         broadcast(new MessageSent($message));
+        if ($message->sender_type === 'visitor') {
+            broadcast(new NewChat($chat));
+        }
 
         return response()->json([
             'message' => $this->serializeMessage($message),
