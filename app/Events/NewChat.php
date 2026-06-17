@@ -17,7 +17,21 @@ class NewChat implements ShouldBroadcastNow
 
     public function __construct(Chat $chat)
     {
-        $this->chat = $chat->load([
+        // $this->chat = $chat->fresh()?->load([
+        //     'latestMessage' => function ($query) {
+        //         $query->select(
+        //             'messages.id',
+        //             'messages.chat_id',
+        //             'messages.sender_type',
+        //             'messages.message',
+        //             'messages.message_type',
+        //             'messages.created_at'
+        //         );
+        //     },
+        //     'companyRel',
+        // ]) ?? $chat;
+
+         $this->chat = $chat->load([
             'latestMessage' => function ($query) {
                 $query->select(
                     'messages.id',
@@ -29,6 +43,7 @@ class NewChat implements ShouldBroadcastNow
                 );
             },
         ]);
+        
     }
 
     public function broadcastOn()
@@ -47,6 +62,14 @@ class NewChat implements ShouldBroadcastNow
                 'company_id' => $this->chat->company_id,
                 'assigned_agent_id' => $this->chat->assigned_agent_id,
                 'status' => $this->chat->status,
+                'phone' => $this->chat->phone,
+                'customer_name' => $this->chat->customer_name,
+                'registration_no' => $this->chat->registration_no,
+                'email' => $this->chat->email,
+                'prechat_submitted_at' => $this->chat->prechat_submitted_at?->toIso8601String(),
+                'user_info_submitted_at' => $this->chat->user_info_submitted_at?->toIso8601String(),
+                'first_visitor_message_at' => $this->chat->first_visitor_message_at?->toIso8601String(),
+                'first_agent_reply_at' => $this->chat->first_agent_reply_at?->toIso8601String(),
                 'country' => $this->chat->country,
                 'website' => $this->chat->website,
                 'website_slug' => $this->chat->website_slug,
@@ -58,6 +81,14 @@ class NewChat implements ShouldBroadcastNow
                 'visitor_last_read_at' => $this->chat->visitor_last_read_at?->toIso8601String(),
                 'created_at' => $this->chat->created_at?->toIso8601String(),
                 'updated_at' => $this->chat->updated_at?->toIso8601String(),
+                'unread_count' => $this->chat->messages()
+                    ->where('sender_type', 'visitor')
+                    ->when(
+                        $this->chat->agent_last_read_at,
+                        fn ($query) => $query->where('created_at', '>', $this->chat->agent_last_read_at)
+                    )
+                    ->count(),
+                'company_rel' => $this->chat->companyRel,
                 'latest_message' => $latest ? [
                     'id' => $latest->id,
                     'chat_id' => $latest->chat_id,

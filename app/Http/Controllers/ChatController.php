@@ -288,6 +288,7 @@ class ChatController extends Controller
                         foreach ($createdMessages as $created) {
                             broadcast(new MessageSent($created));
                         }
+                        broadcast(new NewChat($chat));
                     }
 
                     return response()->noContent();
@@ -306,8 +307,6 @@ class ChatController extends Controller
                     'name' => $request->customer_name,
                     'phone' => $request->phone,
                 ];
-                 broadcast(new NewChat($chat));
-                // broadcast(new MessageSent($chat_message));
             } elseif ($request->message_type == 'cnic_response') {
                 $chat_message = [
                     'type' => 'cnic_response',
@@ -369,6 +368,9 @@ class ChatController extends Controller
             $chat->save();
 
             broadcast(new MessageSent($message));
+            if ($request->sender_type === 'visitor') {
+                broadcast(new NewChat($chat));
+            }
             if ($request->sender_type === 'agent') {
                 $this->broadcastReadUpdate($chat, 'agent');
             }
@@ -498,7 +500,7 @@ class ChatController extends Controller
 
         $messages = $chat->messages()->latest()->take(5)->get()->reverse()->values();
         try {
-            // broadcast(new NewChat($chat));
+            broadcast(new NewChat($chat));
         } catch (\Throwable $e) {
             report($e);
         }
@@ -797,6 +799,7 @@ class ChatController extends Controller
                     foreach ($createdMessages as $created) {
                         broadcast(new MessageSent($created));
                     }
+                    broadcast(new NewChat($chat));
                 }
 
                 return response()->noContent();
@@ -853,6 +856,9 @@ class ChatController extends Controller
             $chat->save();
 
             broadcast(new MessageSent($message));
+            if ($request->sender_type === 'visitor') {
+                broadcast(new NewChat($chat));
+            }
             if ($request->sender_type === 'agent') {
                 $this->broadcastReadUpdate($chat, 'agent');
             }
