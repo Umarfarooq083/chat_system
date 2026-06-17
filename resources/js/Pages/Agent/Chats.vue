@@ -1313,10 +1313,7 @@ const filteredUnassignChatsByCompany = computed(() => {
         <!-- Recent chats header -->
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
-            <div>Recent chats</div>  <div class="flex items-center gap-3">
-           <span class="text-xs text-slate-500">
-              Total: {{ filteredOpenChats.length }}
-           </span>
+            <div style="color: red;">Current chats: {{ filteredOpenChats.length }}</div>  <div class="flex items-center gap-3">
             <button
              type="button"
              class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
