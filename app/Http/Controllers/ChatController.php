@@ -498,7 +498,7 @@ class ChatController extends Controller
 
         $messages = $chat->messages()->latest()->take(5)->get()->reverse()->values();
         try {
-            // broadcast(new NewChat($chat));
+            broadcast(new NewChat($chat));
         } catch (\Throwable $e) {
             report($e);
         }
