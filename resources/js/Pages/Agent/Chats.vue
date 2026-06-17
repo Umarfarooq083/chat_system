@@ -1314,7 +1314,10 @@ const filteredUnassignChatsByCompany = computed(() => {
         <div class="px-4 py-4 border-b border-slate-100">
           <div class="flex items-end justify-between">
             <div>Recent chats</div>  <div class="flex items-center gap-3">
-           <button
+           <span class="text-xs text-slate-500">
+              Total: {{ filteredOpenChats.length }}
+           </span>
+            <button
              type="button"
              class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
              @click="openCnicModal(selectedChat?.id)"
@@ -1325,7 +1328,7 @@ const filteredUnassignChatsByCompany = computed(() => {
           </div>
           
         </div>
-
+        
         <!-- Recent (open) chats list -->
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div
