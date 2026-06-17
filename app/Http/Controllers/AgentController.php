@@ -988,6 +988,7 @@ class AgentController extends Controller
             })->count(),
 
             'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status', 'open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            
             // 'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
             'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)
                 ->whereBetween('created_at', [$from, $to])

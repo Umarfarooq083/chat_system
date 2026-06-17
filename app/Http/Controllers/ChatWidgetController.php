@@ -130,7 +130,7 @@ class ChatWidgetController extends Controller
         $messages = $chat->messages()->orderByDesc('id')->limit(20)->get()->reverse()->values();
 
         try {
-            broadcast(new NewChat($chat));
+            // broadcast(new NewChat($chat));
         } catch (\Throwable $e) {
             report($e);
         }

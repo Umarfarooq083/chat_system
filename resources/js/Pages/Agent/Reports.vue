@@ -1,7 +1,7 @@
 ﻿<script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, router } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { ref, watch ,computed } from 'vue';
 
 const props = defineProps({
     stats: {
@@ -31,6 +31,13 @@ function applyFilters() {
         { preserveState: true, replace: true }
     );
 }
+const totalOpenChats = computed(() => {
+    return props.stats.agent_concurrency.reduce(
+        (sum, agent) => sum + agent.open_chats_count,
+        0
+    );
+});
+
 
 function resetFilters() {
     const today = new Date().toISOString().slice(0, 10);
@@ -130,7 +137,8 @@ function resetFilters() {
                     </div>
                     <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg p-6">
                         <div class="text-sm font-medium text-gray-500">Active Chats</div>
-                        <div class="text-3xl font-bold text-green-600 mt-2">{{ stats.active_chats_count }}</div>
+                        <!-- <div class="text-3xl font-bold text-green-600 mt-2">{{ stats.active_chats_count }}</div> -->
+                        <div class="text-3xl font-bold text-green-600 mt-2">{{ totalOpenChats }}</div>
                     </div>
                     <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg p-6">
                         <div class="text-sm font-medium text-gray-500">Unassigned Chats</div>
@@ -164,6 +172,7 @@ function resetFilters() {
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Closed Status</th>
                                     </tr>
                                 </thead>
+                                
                                 <tbody class="divide-y divide-gray-200">
                                     <tr v-for="concurrency in stats.agent_concurrency" :key="concurrency.assigned_agent_id">
                                         <td class="px-4 py-3 text-sm text-gray-900">{{ concurrency?.name || 'Unknown' }}</td>
