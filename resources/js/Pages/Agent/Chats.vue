@@ -916,8 +916,11 @@ onMounted(() => {
   if (!window.Echo) return
   window.Echo.channel('newChats')
     .listen('NewChat', (e) => {
-      const chatExists = chats.value.some(c => c.id === e.chat.id)
-      if (!chatExists) {
+      const existingChat = chats.value.find(c => c.id === e.chat.id)
+      if (existingChat) {
+        Object.assign(existingChat, e.chat)
+        if (selectedChat.value?.id === e.chat.id) Object.assign(selectedChat.value, e.chat)
+      } else {
         e.chat.unread_count = e.chat.unread_count || 0
         chats.value.unshift(e.chat)
         updateOnlineFlags()
@@ -997,9 +1000,13 @@ const subscribeToChat = (chatId) => {
     .listen('ChatReadUpdated', (e) => {
       const chat = chats.value.find(c => c.id === e.chatId)
       if (!chat) return
+      if (Object.prototype.hasOwnProperty.call(e, 'assignedAgentId')) chat.assigned_agent_id = e.assignedAgentId
+      if (Object.prototype.hasOwnProperty.call(e, 'status')) chat.status = e.status
       if (e.agentLastReadAt) chat.agent_last_read_at = e.agentLastReadAt
       if (e.visitorLastReadAt) chat.visitor_last_read_at = e.visitorLastReadAt
       if (selectedChat.value?.id === chat.id) {
+        if (Object.prototype.hasOwnProperty.call(e, 'assignedAgentId')) selectedChat.value.assigned_agent_id = e.assignedAgentId
+        if (Object.prototype.hasOwnProperty.call(e, 'status')) selectedChat.value.status = e.status
         if (e.agentLastReadAt) selectedChat.value.agent_last_read_at = e.agentLastReadAt
         if (e.visitorLastReadAt) selectedChat.value.visitor_last_read_at = e.visitorLastReadAt
       }

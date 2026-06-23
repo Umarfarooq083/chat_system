@@ -18,6 +18,8 @@ class ChatReadUpdated implements ShouldBroadcastNow
     public ?string $readAt;
     public ?string $agentLastReadAt;
     public ?string $visitorLastReadAt;
+    public ?int $assignedAgentId;
+    public ?string $status;
 
     public function __construct(Chat $chat, string $readerType)
     {
@@ -26,6 +28,8 @@ class ChatReadUpdated implements ShouldBroadcastNow
         $this->agentLastReadAt = $chat->agent_last_read_at?->toIso8601String();
         $this->visitorLastReadAt = $chat->visitor_last_read_at?->toIso8601String();
         $this->readAt = $readerType === 'agent' ? $this->agentLastReadAt : $this->visitorLastReadAt;
+        $this->assignedAgentId = $chat->assigned_agent_id;
+        $this->status = $chat->status;
     }
 
     public function broadcastOn(): Channel
@@ -33,4 +37,3 @@ class ChatReadUpdated implements ShouldBroadcastNow
         return new Channel('chat.' . $this->chatId);
     }
 }
-
