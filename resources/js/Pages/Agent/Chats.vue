@@ -302,21 +302,20 @@ const resolveChatForCnicAction = () => {
 const sendCnicRegistrationHtml = async (registrationNo) => {
   const regStr = (registrationNo || '').toString().trim()
   if (!regStr) return
-
   const chat = resolveChatForCnicAction()
+ 
   if (!chat?.id) {
     sendError.value = 'No chat selected. Please select a chat first.'
     return
   }
-
   cnicSendLoading.value[regStr] = true
   try {
-    // Ensure we have fetched data for this registration number (so HTML exists).
-    await fetchCnicRegistrationData(regStr)
+    const response = await fetchCnicRegistrationData(regStr)
+      if(response.external_data?.data?.errors?.message){
+        sendError.value = response.message || 'No external File found for this registration or approval is required.'
+      }
     await sendExternalHtml(chat, regStr)
-    sendError.value = ''
   } catch (e) {
-    // sendExternalHtml already sets sendError, keep a fallback.
     sendError.value = extractErrorMessage(e, 'Failed to send HTML for registration.')
   } finally {
     cnicSendLoading.value[regStr] = false
@@ -1151,6 +1150,8 @@ const filteredUnassignChatsByCompany = computed(() => {
     <!-- </template> -->
 
     <!-- Agent Load Mini Cart - Fixed Top Left -->
+     <!-- {{ props.chats }} -->
+    
     <div 
       class="fixed top-4 right-4 z-50"
       @mouseenter="showAgentLoadPreview = true; refreshAgentLoadOnHover()"
