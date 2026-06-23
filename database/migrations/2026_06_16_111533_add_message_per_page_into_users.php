@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->integer('message_per_page')->default(20);
+            $table->integer('message_per_page')->default(50);
         });
     }
 

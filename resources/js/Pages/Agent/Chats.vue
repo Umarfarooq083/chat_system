@@ -1,6 +1,6 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
-import { ref, onMounted, onBeforeUnmount, watch,computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import axios from 'axios'
 import Modal from '@/Components/Modal.vue'
 import PrimaryButton from '@/Components/PrimaryButton.vue'
@@ -77,6 +77,7 @@ const feedbackError = ref('')
 const selectedInquiries = ref({});
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
+const messageContainer = ref(null)
 const isDraggingOver = ref(false)
 const pasteListenerActive = ref(false)
 const dismissedClosedChatId = ref(null)
@@ -376,6 +377,23 @@ watch(selectedChat, (newChat, oldChat) => {
   }
 })
 
+const scrollMessagesToBottom = async () => {
+  await nextTick()
+  if (!messageContainer.value) return
+
+  messageContainer.value.scrollTop = messageContainer.value.scrollHeight
+
+  requestAnimationFrame(() => {
+    if (messageContainer.value) {
+      messageContainer.value.scrollTop = messageContainer.value.scrollHeight
+    }
+  })
+}
+
+watch(messages, () => {
+  scrollMessagesToBottom()
+}, { deep: true })
+
 const selectChat = async (chat) => {
   selectedChat.value = chat
   messages.value = []
@@ -392,6 +410,7 @@ const selectChat = async (chat) => {
     })
     if (response.data?.chat) Object.assign(chat, response.data.chat)
     messages.value = Array.isArray(response.data?.messages) ? response.data.messages : []
+    await scrollMessagesToBottom()
     await fetchFeedbacks(chat.id)
   } catch (e) {
     messages.value = []
@@ -897,8 +916,11 @@ onMounted(() => {
   if (!window.Echo) return
   window.Echo.channel('newChats')
     .listen('NewChat', (e) => {
-      const chatExists = chats.value.some(c => c.id === e.chat.id)
-      if (!chatExists) {
+      const existingChat = chats.value.find(c => c.id === e.chat.id)
+      if (existingChat) {
+        Object.assign(existingChat, e.chat)
+        if (selectedChat.value?.id === e.chat.id) Object.assign(selectedChat.value, e.chat)
+      } else {
         e.chat.unread_count = e.chat.unread_count || 0
         chats.value.unshift(e.chat)
         updateOnlineFlags()
@@ -978,9 +1000,13 @@ const subscribeToChat = (chatId) => {
     .listen('ChatReadUpdated', (e) => {
       const chat = chats.value.find(c => c.id === e.chatId)
       if (!chat) return
+      if (Object.prototype.hasOwnProperty.call(e, 'assignedAgentId')) chat.assigned_agent_id = e.assignedAgentId
+      if (Object.prototype.hasOwnProperty.call(e, 'status')) chat.status = e.status
       if (e.agentLastReadAt) chat.agent_last_read_at = e.agentLastReadAt
       if (e.visitorLastReadAt) chat.visitor_last_read_at = e.visitorLastReadAt
       if (selectedChat.value?.id === chat.id) {
+        if (Object.prototype.hasOwnProperty.call(e, 'assignedAgentId')) selectedChat.value.assigned_agent_id = e.assignedAgentId
+        if (Object.prototype.hasOwnProperty.call(e, 'status')) selectedChat.value.status = e.status
         if (e.agentLastReadAt) selectedChat.value.agent_last_read_at = e.agentLastReadAt
         if (e.visitorLastReadAt) selectedChat.value.visitor_last_read_at = e.visitorLastReadAt
       }
@@ -1722,7 +1748,7 @@ const filteredUnassignChatsByCompany = computed(() => {
             </div>
           </div>
 
-          <div class="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-3">
+          <div ref="messageContainer" class="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-3">
             <div v-for="msg in messages" :key="msg.id" :class="['flex', msg.sender_type === 'agent' ? 'justify-end' : 'justify-start']">
 
               <div v-if="msg.message_type === 'prechat_info_request'" class="max-w-sm bg-cyan-50 border border-cyan-200 rounded-xl p-3">
