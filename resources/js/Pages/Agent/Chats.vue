@@ -74,6 +74,7 @@ const feedbackForm = ref({
   request_type: [],
 })
 const feedbackError = ref('')
+const feedbackRegistrationDropdownOpen = ref(false)
 const selectedInquiries = ref({});
 const attachedFiles = ref([])
 const fileInputRef = ref(null)
@@ -455,6 +456,7 @@ const closeFeedbackPanel = () => {
   showFeedbackPanel.value = false
   feedbackForm.value = { information: [], complain: [], request_type: [], registration_no: ''  }
   feedbackError.value = ''
+  feedbackRegistrationDropdownOpen.value = false
 }
 
 const submitFeedback = async () => {
@@ -483,6 +485,7 @@ const submitFeedback = async () => {
 
     feedbackForm.value.registration_no = ''
     feedbackError.value = ''
+    feedbackRegistrationDropdownOpen.value = false
 
   } catch (e) {
     feedbackError.value = extractErrorMessage(e, 'Failed to save feedback.')
@@ -568,6 +571,9 @@ const fetchExternalDataForMessage = async (chat, msg) => {
   externalFetching.value = true
   try {
     const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`, { registration_no: registrationNo })
+     if(response?.data?.external_data?.data?.errors?.message){
+        sendError.value = response.message || 'No File found for this registration or approval is required. '
+      }
     if (response.data?.chat) mergeChatIntoList(response.data.chat)
   } catch (e) {
     sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')
@@ -1025,6 +1031,51 @@ const subscribeToChat = (chatId) => {
 const filteredRegistrationNo = computed(() => {
   return messages.value.filter(msg => msg?.message_type === 'user_info_response');
 });
+
+const feedbackRegistrationOptions = computed(() => {
+  const seen = new Set()
+
+  return filteredRegistrationNo.value
+    .map(message => (getUserInfo(message).registration_no || '').toString().trim())
+    .filter((registrationNo) => {
+      if (!registrationNo || seen.has(registrationNo)) return false
+      seen.add(registrationNo)
+      return true
+    })
+})
+
+const filteredFeedbackRegistrationOptions = computed(() => {
+  const search = (feedbackForm.value.registration_no || '').toString().trim().toLowerCase()
+  if (!search) return feedbackRegistrationOptions.value
+
+  return feedbackRegistrationOptions.value.filter(registrationNo =>
+    registrationNo.toLowerCase().includes(search)
+  )
+})
+
+const showFeedbackRegistrationDropdown = () => {
+  feedbackRegistrationDropdownOpen.value = true
+}
+
+const hideFeedbackRegistrationDropdown = () => {
+  window.setTimeout(() => {
+    feedbackRegistrationDropdownOpen.value = false
+  }, 150)
+}
+
+const selectFeedbackRegistrationNo = (registrationNo) => {
+  feedbackForm.value.registration_no = registrationNo
+  feedbackRegistrationDropdownOpen.value = false
+}
+
+const onFeedbackRegistrationPaste = (event) => {
+  const pastedText = event.clipboardData?.getData('text')
+  if (typeof pastedText !== 'string') return
+
+  event.preventDefault()
+  feedbackForm.value.registration_no = pastedText.trim()
+  feedbackRegistrationDropdownOpen.value = true
+}
 
 const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
   if (!relativeOrAbsoluteUrl) return null
@@ -1697,14 +1748,46 @@ const filteredUnassignChatsByCompany = computed(() => {
                   </select>
                 </div>
 
-                <div class="md:col-span-4">
-                  <select v-model="feedbackForm.registration_no" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
-                    <option disabled value="">Registration No</option>
-                    <option value="">Unknown</option>
-                    <option v-for="message in filteredRegistrationNo" :value="getUserInfo(message).registration_no">
-                      {{ getUserInfo(message).registration_no }}
-                    </option>
-                  </select>
+                <div class="md:col-span-4 relative">
+                  <input
+                    v-model="feedbackForm.registration_no"
+                    type="text"
+                    placeholder="Select or Paste Registration No"
+                    autocomplete="off"
+                    @focus="showFeedbackRegistrationDropdown"
+                    @input="showFeedbackRegistrationDropdown"
+                    @click="showFeedbackRegistrationDropdown"
+                    @blur="hideFeedbackRegistrationDropdown"
+                    @paste="onFeedbackRegistrationPaste"
+                    class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                  >
+                  <div
+                    v-if="feedbackRegistrationDropdownOpen"
+                    class="absolute left-0 right-0 top-full z-30 mt-1 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      class="block w-full px-3 py-2 text-left text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"
+                      @mousedown.prevent="selectFeedbackRegistrationNo('')"
+                    >
+                      Unknown
+                    </button>
+                    <button
+                      v-for="registrationNo in filteredFeedbackRegistrationOptions"
+                      :key="registrationNo"
+                      type="button"
+                      class="block w-full px-3 py-2 text-left font-mono text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"
+                      @mousedown.prevent="selectFeedbackRegistrationNo(registrationNo)"
+                    >
+                      {{ registrationNo }}
+                    </button>
+                    <div
+                      v-if="feedbackForm.registration_no && !filteredFeedbackRegistrationOptions.length"
+                      class="px-3 py-2 text-xs text-slate-400"
+                    >
+                      No matching registration no
+                    </div>
+                  </div>
                 </div>
 
                 <div class="md:col-span-4 flex items-center justify-end gap-2">
