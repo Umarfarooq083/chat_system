@@ -568,6 +568,9 @@ const fetchExternalDataForMessage = async (chat, msg) => {
   externalFetching.value = true
   try {
     const response = await axios.post(`/agent/chats/${chat.id}/external/fetch`, { registration_no: registrationNo })
+     if(response?.data?.external_data?.data?.errors?.message){
+        sendError.value = response.message || 'No File found for this registration or approval is required. '
+      }
     if (response.data?.chat) mergeChatIntoList(response.data.chat)
   } catch (e) {
     sendError.value = extractErrorMessage(e, 'Failed to fetch data. Please try again.')

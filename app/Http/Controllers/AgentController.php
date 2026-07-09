@@ -875,7 +875,7 @@ class AgentController extends Controller
         $html = trim((string) $html);
         if (! $fetch || $html === '') {
             return response()->json([
-                'message' => 'No external HTML found for this registration. Please fetch data first.',
+                'message' => 'No File found for this registration or approval is required.',
             ], 422);
         }
         try {
