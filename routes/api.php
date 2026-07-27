@@ -21,7 +21,8 @@ Route::post('/chat/ping', [ChatController::class, 'ping'])
 Route::post('/chat/read', [ChatController::class, 'externalMarkVisitorRead'])
     ->middleware(CheckChatToken::class);
 
-Route::prefix('widget')->middleware('throttle:60,1')->group(function () {
+
+Route::prefix('widget')->middleware('throttle:widget')->group(function () {
     Route::post('/chat', [ChatWidgetController::class, 'createChat']);
     Route::post('/chat/new', [ChatWidgetController::class, 'newChat']);
     Route::post('/message', [ChatWidgetController::class, 'sendMessage']);
@@ -29,3 +30,13 @@ Route::prefix('widget')->middleware('throttle:60,1')->group(function () {
     Route::post('/chat/read', [ChatWidgetController::class, 'markRead']);
     Route::get('/messages', [ChatWidgetController::class, 'messages']);
 });
+
+
+// Route::prefix('widget')->middleware('throttle:300,1')->group(function () {
+//     Route::post('/chat', [ChatWidgetController::class, 'createChat']);
+//     Route::post('/chat/new', [ChatWidgetController::class, 'newChat']);
+//     Route::post('/message', [ChatWidgetController::class, 'sendMessage']);
+//     Route::post('/chat/ping', [ChatWidgetController::class, 'ping']);
+//     Route::post('/chat/read', [ChatWidgetController::class, 'markRead']);
+//     Route::get('/messages', [ChatWidgetController::class, 'messages']);
+// });
