@@ -98,3 +98,8 @@ const submit = () => {
         </form>
     </GuestLayout>
 </template>
+<style scoped>
+.max-w-5xl { 
+    max-width: 40rem !important;
+}
+</style>
