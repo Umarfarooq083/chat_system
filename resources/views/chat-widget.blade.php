@@ -570,7 +570,7 @@
 
     function startMessagePolling() {
         if (messagePollTimer) return;
-        messagePollTimer = setInterval(fetchNewMessages, 5000);
+        messagePollTimer = setInterval(fetchNewMessages, 20000);
     }
 
     function handleIncomingMessage(message) {

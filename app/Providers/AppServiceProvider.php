@@ -28,7 +28,7 @@ class AppServiceProvider extends ServiceProvider
         Schema::defaultStringLength(191);
 
         RateLimiter::for('widget', function (Request $request) {
-            return Limit::perMinute(300)->by(
+            return Limit::perMinute(800)->by(
                 $request->header('X-Visitor-Id')
                     ?? $request->input('visitor_id')
                     ?? $request->query('visitor_id')
