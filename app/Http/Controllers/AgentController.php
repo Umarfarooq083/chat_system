@@ -20,6 +20,7 @@ use Inertia\Inertia;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use App\Models\User;
+use Illuminate\Support\Facades\Crypt;
 
 class AgentController extends Controller
 {
@@ -569,10 +570,12 @@ class AgentController extends Controller
         }
         ChatFeedback::insert($inquiryFeedBack);
         $payload = [
+            'chat_id' => Crypt::encryptString((string) $chat->id),
             'registration_no' => $request->registration_no,
             'inquiries' => $request->inquiries,
         ];
-
+        
+//   $chatId = (int) Crypt::decryptString($request->chat_id);
         $url = env('ENQUIRY_TYPE_POST_API_URL');
 
         Http::withHeaders([

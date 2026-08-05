@@ -8,7 +8,9 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Company;
 use App\Models\Message;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -54,7 +56,7 @@ class ChatController extends Controller
 
     private function extractUserInfoFieldFromMessage(string $message, string $label): ?string
     {
-        $pattern = '/^'.preg_quote($label, '/').'\\s*:\\s*(.+)\\s*$/mi';
+        $pattern = '/^' . preg_quote($label, '/') . '\\s*:\\s*(.+)\\s*$/mi';
         if (preg_match($pattern, $message, $matches) !== 1) {
             return null;
         }
@@ -83,9 +85,9 @@ class ChatController extends Controller
         $customerName = is_string($customerName) ? trim($customerName) : null;
         if (is_array($registrationNo)) {
             $registrationNo = collect($registrationNo)
-                ->filter(fn ($v) => is_string($v))
-                ->map(fn ($v) => trim($v))
-                ->first(fn ($v) => $v !== '');
+                ->filter(fn($v) => is_string($v))
+                ->map(fn($v) => trim($v))
+                ->first(fn($v) => $v !== '');
         }
         $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
         $email = is_string($email) ? trim($email) : null;
@@ -327,8 +329,8 @@ class ChatController extends Controller
                     $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
                     $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
 
-                    $fileName = (string) Str::uuid().'.'.$ext;
-                    $dir = 'chat-attachments/'.$chat->id;
+                    $fileName = (string) Str::uuid() . '.' . $ext;
+                    $dir = 'chat-attachments/' . $chat->id;
                     $filePath = $uploaded->storeAs($dir, $fileName, 'public');
                 }
             }
@@ -817,8 +819,8 @@ class ChatController extends Controller
                     $ext = $uploaded->guessExtension() ?: $uploaded->getClientOriginalExtension() ?: 'bin';
                     $ext = strtolower(preg_replace('/[^a-z0-9]+/i', '', $ext)) ?: 'bin';
 
-                    $fileName = (string) Str::uuid().'.'.$ext;
-                    $dir = 'chat-attachments/'.$chat->id;
+                    $fileName = (string) Str::uuid() . '.' . $ext;
+                    $dir = 'chat-attachments/' . $chat->id;
                     $filePath = $uploaded->storeAs($dir, $fileName, 'public');
                 }
             }
@@ -975,10 +977,10 @@ class ChatController extends Controller
         $chat = Chat::find($request->chat_id);
 
         // Create a formatted message with user info
-        $userInfoMessage = "User Information Request:\n".
-                          "Name: {$request->name}\n".
-                          "Email: {$request->email}\n".
-                          "Details: {$request->details}";
+        $userInfoMessage = "User Information Request:\n" .
+            "Name: {$request->name}\n" .
+            "Email: {$request->email}\n" .
+            "Details: {$request->details}";
 
         $message = Message::create([
             'chat_id' => $chat->id,
@@ -999,5 +1001,35 @@ class ChatController extends Controller
         }
 
         return response()->json(['message' => $message]);
+    }
+
+    public function chatHistory(Request $request)
+    {
+        if (empty($request->chat_id)) {
+            return response()->json([
+                'message' => 'Chat ID is required'
+            ], 400);
+        }
+
+        try {
+            $chatId = (int) Crypt::decryptString($request->chat_id);
+        } catch (DecryptException $e) {
+            abort(404); 
+        }
+
+        $chat = Chat::find($chatId);
+
+        if (!$chat) {
+            abort(404);
+        }
+
+        $messages = $chat->messages()
+            ->orderBy('created_at', 'asc')
+            ->paginate(50)
+            ->withQueryString();
+
+        return Inertia::render('ChatHistory/Chat', [
+            'chats' => $messages,
+        ]);
     }
 }

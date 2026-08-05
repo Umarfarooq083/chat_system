@@ -37,6 +37,7 @@ Route::middleware('auth')->group(function () {
 // });
 
 Route::get('/chat', [ChatController::class, 'visitorChat']);
+Route::get('/chat-history', [ChatController::class, 'chatHistory']);
 
 Route::post('/send-message', [ChatController::class, 'sendMessage']);
 Route::post('/chat/ping', [ChatController::class, 'ping']);
