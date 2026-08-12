@@ -6,6 +6,7 @@ import { ref} from 'vue'
 
 const props = defineProps({
     chats: Object,
+    AgentName: Object,
 });
 
 
@@ -61,21 +62,33 @@ const openImageViewer = (imageUrl, imageName = 'Image') => {
 
     <GuestLayout>
 
-        <template #header>
-            <div class="flex items-center justify-between">
+       <template #header>
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-6 bg-gradient-to-r from-indigo-50 to-white rounded-xl border border-indigo-100">
+        <!-- Left Section -->
+        <div class="space-y-2">
+            <div class="flex items-center gap-3">
+                <div class="h-10 w-1 bg-indigo-500 rounded-full"></div>
                 <div>
-                    <h2 class="text-2xl font-bold text-gray-800">
+                    <h2 class="text-3xl font-bold text-gray-900 tracking-tight">
                         Chat History
                     </h2>
-                    <p class="text-sm text-gray-500 mt-1">
-                        Review your previous conversations.
-                    </p>
                 </div>
-                <span class="rounded-full bg-indigo-100 px-4 py-2 text-sm font-semibold text-indigo-700">
-                    {{ chats.data.length }} Messages
+            </div>
+            
+            <!-- Agent Badge -->
+            <div class="flex items-center gap-2 ml-4">
+                <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <span class="text-sm font-medium text-gray-700">
+                    Agent: <span class="text-indigo-700 font-semibold">{{ AgentName?.agent?.name }}</span>
                 </span>
             </div>
-        </template>
+        </div>
+
+       
+    </div>
+</template>
 
         <div class="space-y-6">
             <div v-for="chat in chats.data" :key="chat.id" class="flex items-end gap-3" :class="chat.sender_type === 'visitor'

@@ -89,7 +89,7 @@ Route::post('/visitor-chat/create', [ChatController::class, 'getOrCreateChat']);
 Route::post('/visitor-chat/new', [ChatController::class, 'newChat']);
 // Route::post('/send-message', [ChatController::class, 'sendMessage']);
 
-require __DIR__.'/auth.php';
+require __DIR__ . '/auth.php';
 
 // phone no (required)
 // customer name (required)

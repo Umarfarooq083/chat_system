@@ -14,6 +14,7 @@ const form = ref({
     name: '',
     email: '',
     message_per_page: 10,
+    role: '',
     password: '',
     company_ids: [],
 });
@@ -90,6 +91,17 @@ function submit() {
                                     :class="errors.message_per_page ? 'border-red-300' : ''"
                                 />
                                 <p v-if="errors.message_per_page" class="mt-1 text-sm text-red-600">{{ errors.message_per_page }}</p>
+                            </div>
+
+                            <div>
+                                <label for="select_a_role" class="block text-sm font-medium text-gray-700">User Role</label>
+                                <select v-model="form.role" class="form-select mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                    <option value="">Select a Role</option>
+                                    <option value="Super Admin">Super Admin</option>
+                                    <option value="Web User">Web User</option>
+                                    <option value="QA User">QA User</option>
+                                </select>
+                                <p v-if="errors.role" class="mt-1 text-sm text-red-600">{{ errors.role }}</p>
                             </div>
 
                             <div>

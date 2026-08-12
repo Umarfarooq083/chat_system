@@ -8,6 +8,7 @@ use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Company;
 use App\Models\Message;
+use App\Services\VisitorSelfServiceResponder;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -52,6 +53,13 @@ class ChatController extends Controller
         $visitorId = session('visitor_id');
 
         return is_string($visitorId) && $visitorId !== '' && $chat->visitor_id === $visitorId;
+    }
+
+    private function hasAgentChatStarted(Chat $chat): bool
+    {
+        return $chat->agent_chat_requested_at !== null
+            || $chat->assigned_agent_id !== null
+            || $chat->first_agent_reply_at !== null;
     }
 
     private function extractUserInfoFieldFromMessage(string $message, string $label): ?string
@@ -192,6 +200,7 @@ class ChatController extends Controller
             'registration_no.*' => 'nullable|string|max:100',
             'email' => 'nullable|string|max:255',
             'cnic' => 'nullable|string|max:30',
+            'cnic' => 'nullable|string|max:30',
         ]);
 
         try {
@@ -219,6 +228,18 @@ class ChatController extends Controller
                 }
             }
 
+            $menuMessageTypes = [
+                'prechat_info_response',
+                'user_info_response',
+                'cnic_response',
+                'chat_with_agent_request',
+            ];
+            if ($request->sender_type === 'visitor' && ! $this->hasAgentChatStarted($chat) && ! in_array($messageType, $menuMessageTypes, true)) {
+                return response()->json([
+                    'message' => 'Please select an option before chatting with an agent.',
+                ], 409);
+            }
+
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
                 $chat->visitor_last_read_at = now();
@@ -235,6 +256,9 @@ class ChatController extends Controller
                         'message' => 'CNIC is required.',
                     ], 422);
                 }
+            }
+            if ($request->sender_type === 'visitor' && $messageType === 'chat_with_agent_request' && $chat->agent_chat_requested_at === null) {
+                $chat->agent_chat_requested_at = now();
             }
 
             $chat_message = [];
@@ -275,9 +299,6 @@ class ChatController extends Controller
                     $last = end($createdMessages);
                     if ($last) {
                         $chat->last_message_at = $last->created_at;
-                        if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
-                            $chat->first_visitor_message_at = $last->created_at;
-                        }
                         if (! $chat->ip) {
                             $chat->ip = $request->ip();
                         }
@@ -290,7 +311,10 @@ class ChatController extends Controller
                         foreach ($createdMessages as $created) {
                             broadcast(new MessageSent($created));
                         }
-                        broadcast(new NewChat($chat));
+                        $responder = app(VisitorSelfServiceResponder::class);
+                        foreach ($registrationNumbers as $registrationNo) {
+                            $responder->sendLedgerHtml($chat, $registrationNo);
+                        }
                     }
 
                     return response()->noContent();
@@ -314,6 +338,8 @@ class ChatController extends Controller
                     'type' => 'cnic_response',
                     'cnic' => trim((string) $request->input('cnic')),
                 ];
+            } elseif ($request->message_type == 'chat_with_agent_request') {
+                $chat_message = 'Chat with agent requested.';
             } else {
                 $chat_message = $request->message;
             }
@@ -345,7 +371,11 @@ class ChatController extends Controller
 
             // keep chat list ordering consistent
             $chat->last_message_at = $message->created_at;
-            if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
+            if (
+                $request->sender_type === 'visitor'
+                && $chat->first_visitor_message_at === null
+                && ! in_array($messageType, ['prechat_info_response', 'user_info_response', 'cnic_response'], true)
+            ) {
                 $chat->first_visitor_message_at = $message->created_at;
             }
             if (
@@ -370,7 +400,20 @@ class ChatController extends Controller
             $chat->save();
 
             broadcast(new MessageSent($message));
-            if ($request->sender_type === 'visitor') {
+            $responder = app(VisitorSelfServiceResponder::class);
+            if ($request->sender_type === 'visitor' && $messageType === 'user_info_response') {
+                $registrationNo = $request->input('registration_no');
+                if (is_array($registrationNo)) {
+                    $registrationNo = $registrationNo[0] ?? null;
+                }
+                $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+                if ($registrationNo) {
+                    $responder->sendLedgerHtml($chat, $registrationNo);
+                }
+            } elseif ($request->sender_type === 'visitor' && $messageType === 'cnic_response') {
+                $responder->sendCnicLookupResult($chat, trim((string) $request->input('cnic')));
+            }
+            if ($request->sender_type === 'visitor' && $this->hasAgentChatStarted($chat)) {
                 broadcast(new NewChat($chat));
             }
             if ($request->sender_type === 'agent') {
@@ -594,7 +637,7 @@ class ChatController extends Controller
         $messages = $chat->messages()->latest()->take(5)->get();
 
         try {
-            broadcast(new NewChat($chat));
+            // Visitor chats enter the agent queue only after "Chat with Agent" is selected.
         } catch (\Throwable $e) {
             report($e);
         }
@@ -636,7 +679,7 @@ class ChatController extends Controller
         $messages = $chat->messages()->latest()->take(5)->get()->reverse()->values();
 
         try {
-            broadcast(new NewChat($chat));
+            // Visitor chats enter the agent queue only after "Chat with Agent" is selected.
         } catch (\Throwable $e) {
             report($e);
         }
@@ -692,7 +735,7 @@ class ChatController extends Controller
         $messages = $chat->messages()->latest()->take(5)->get();
 
         try {
-            broadcast(new NewChat($chat));
+            // Visitor chats enter the agent queue only after "Chat with Agent" is selected.
         } catch (\Throwable $e) {
             report($e);
         }
@@ -739,6 +782,18 @@ class ChatController extends Controller
                 ], 409);
             }
 
+            $menuMessageTypes = [
+                'prechat_info_response',
+                'user_info_response',
+                'cnic_response',
+                'chat_with_agent_request',
+            ];
+            if ($request->sender_type === 'visitor' && ! $this->hasAgentChatStarted($chat) && ! in_array($messageType, $menuMessageTypes, true)) {
+                return response()->json([
+                    'message' => 'Please select an option before chatting with an agent.',
+                ], 409);
+            }
+
             if ($request->sender_type === 'visitor') {
                 $chat->last_activity = now();
                 $chat->visitor_last_read_at = now();
@@ -747,6 +802,18 @@ class ChatController extends Controller
 
             $this->applyVisitorPrechatInfoToChat($request, $chat);
             $this->applyVisitorUserInfoToChat($request, $chat);
+            if ($request->sender_type === 'visitor' && $messageType === 'cnic_response') {
+                $cnic = $request->input('cnic');
+                $cnic = is_string($cnic) ? trim($cnic) : null;
+                if (! $cnic) {
+                    return response()->json([
+                        'message' => 'CNIC is required.',
+                    ], 422);
+                }
+            }
+            if ($request->sender_type === 'visitor' && $messageType === 'chat_with_agent_request' && $chat->agent_chat_requested_at === null) {
+                $chat->agent_chat_requested_at = now();
+            }
 
             $registrationNumbers = $request->input('registration_no');
             if (is_string($registrationNumbers)) {
@@ -786,9 +853,6 @@ class ChatController extends Controller
                 $last = end($createdMessages);
                 if ($last) {
                     $chat->last_message_at = $last->created_at;
-                    if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
-                        $chat->first_visitor_message_at = $last->created_at;
-                    }
                     if (! $chat->ip) {
                         $chat->ip = $request->ip();
                     }
@@ -801,7 +865,10 @@ class ChatController extends Controller
                     foreach ($createdMessages as $created) {
                         broadcast(new MessageSent($created));
                     }
-                    broadcast(new NewChat($chat));
+                    $responder = app(VisitorSelfServiceResponder::class);
+                    foreach ($registrationNumbers as $registrationNo) {
+                        $responder->sendLedgerHtml($chat, $registrationNo);
+                    }
                 }
 
                 return response()->noContent();
@@ -834,7 +901,11 @@ class ChatController extends Controller
             ]);
 
             $chat->last_message_at = $message->created_at;
-            if ($request->sender_type === 'visitor' && $chat->first_visitor_message_at === null) {
+            if (
+                $request->sender_type === 'visitor'
+                && $chat->first_visitor_message_at === null
+                && ! in_array($messageType, ['prechat_info_response', 'user_info_response', 'cnic_response'], true)
+            ) {
                 $chat->first_visitor_message_at = $message->created_at;
             }
             if (
@@ -858,7 +929,20 @@ class ChatController extends Controller
             $chat->save();
 
             broadcast(new MessageSent($message));
-            if ($request->sender_type === 'visitor') {
+            $responder = app(VisitorSelfServiceResponder::class);
+            if ($request->sender_type === 'visitor' && $messageType === 'user_info_response') {
+                $registrationNo = $request->input('registration_no');
+                if (is_array($registrationNo)) {
+                    $registrationNo = $registrationNo[0] ?? null;
+                }
+                $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+                if ($registrationNo) {
+                    $responder->sendLedgerHtml($chat, $registrationNo);
+                }
+            } elseif ($request->sender_type === 'visitor' && $messageType === 'cnic_response') {
+                $responder->sendCnicLookupResult($chat, trim((string) $request->input('cnic')));
+            }
+            if ($request->sender_type === 'visitor' && $this->hasAgentChatStarted($chat)) {
                 broadcast(new NewChat($chat));
             }
             if ($request->sender_type === 'agent') {
@@ -1014,10 +1098,10 @@ class ChatController extends Controller
         try {
             $chatId = (int) Crypt::decryptString($request->chat_id);
         } catch (DecryptException $e) {
-            abort(404); 
+            abort(404);
         }
 
-        $chat = Chat::find($chatId);
+        $chat = Chat::with('agent')->find($chatId);
 
         if (!$chat) {
             abort(404);
@@ -1030,6 +1114,7 @@ class ChatController extends Controller
 
         return Inertia::render('ChatHistory/Chat', [
             'chats' => $messages,
+            'AgentName' => $chat,
         ]);
     }
 }

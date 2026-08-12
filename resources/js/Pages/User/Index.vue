@@ -72,6 +72,7 @@ function confirmDestroy(user) {
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Per Page</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Companies</th>
                                     <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
@@ -91,6 +92,9 @@ function confirmDestroy(user) {
                                             </span>
                                         </div>
                                     </td>
+                                     <td class="px-6 py-4 text-sm text-gray-500">
+                                        {{ user?.roles }}
+                                    </td>
                                     <td class="px-6 py-4 text-sm text-gray-500">
                                         <div class="flex flex-wrap gap-1">
                                             <span
@@ -106,6 +110,7 @@ function confirmDestroy(user) {
                                             </span>
                                         </div>
                                     </td>
+                                   
                                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <div class="flex justify-end gap-2">
                                             <Link v-if="$page.props.auth.user.roles === 'Super Admin'"

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import axios from 'axios'
 import { usePage } from '@inertiajs/vue3'
 import { extractErrorMessage } from '../utils/extractErrorMessage'
@@ -12,6 +12,8 @@ const attachedFiles = ref([])
 const fileInputRef = ref(null)
 const messageContainer = ref(null)
 const showPrechatForm = ref(false)
+const showBotMenu = ref(false)
+const agentChatStarted = ref(false)
 const showUserForm = ref(false)
 const showCnicForm = ref(false)
 const sendError = ref('')
@@ -38,6 +40,10 @@ let visitorId = null
 let lastSentUrl = null
 let urlTrackingSetup = false
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+const isComposerLocked = computed(() => {
+  return showPrechatForm.value || showBotMenu.value || showUserForm.value || showCnicForm.value || !agentChatStarted.value || chatClosed.value
+})
 
 const resolveAttachmentUrl = (relativeOrAbsoluteUrl) => {
   if (!relativeOrAbsoluteUrl) return null
@@ -172,6 +178,8 @@ onMounted(async () => {
     const hasBasicInfo = !!phone && !!name
     const hasPrechatResponse = messages.value.some(msg => msg.message_type === 'prechat_info_response' && msg.sender_type === 'visitor')
     showPrechatForm.value = !chat.prechat_submitted_at && !chat.user_info_submitted_at && !hasBasicInfo && !hasPrechatResponse
+    agentChatStarted.value = !showPrechatForm.value && (!!chat.agent_chat_requested_at || chat.bot_menu_required === false || !!chat.assigned_agent_id || !!chat.first_agent_reply_at)
+    showBotMenu.value = !showPrechatForm.value && !agentChatStarted.value
     
     await scrollToBottom()
 
@@ -184,6 +192,7 @@ onMounted(async () => {
           }
           if (e.message.message_type === 'prechat_info_response' && e.message.sender_type === 'visitor') {
             showPrechatForm.value = false
+            if (!agentChatStarted.value) showBotMenu.value = true
           }
           // Check if this is a user info request
           if (e.message.message_type === 'user_info_request') {
@@ -192,12 +201,18 @@ onMounted(async () => {
           // Hide form if user just submitted response
           if (e.message.message_type === 'user_info_response' && e.message.sender_type === 'visitor') {
             showUserForm.value = false
+            if (!agentChatStarted.value) showBotMenu.value = true
           }
           if (e.message.message_type === 'cnic_request') {
             showCnicForm.value = true
           }
           if (e.message.message_type === 'cnic_response' && e.message.sender_type === 'visitor') {
             showCnicForm.value = false
+            if (!agentChatStarted.value) showBotMenu.value = true
+          }
+          if (e.message.message_type === 'chat_with_agent_request' && e.message.sender_type === 'visitor') {
+            agentChatStarted.value = true
+            showBotMenu.value = false
           }
           if (e.message.sender_type === 'agent') {
             markVisitorRead()
@@ -292,6 +307,7 @@ const markVisitorRead = async () => {
 }
 
 const triggerFileInput = () => {
+  if (isComposerLocked.value) return
   fileInputRef.value?.click()
 }
 
@@ -330,6 +346,10 @@ const sendMessage = async () => {
   if (!chatId) return
   if (showPrechatForm.value) {
     sendError.value = 'Please provide your name and phone number to start chatting.'
+    return
+  }
+  if (isComposerLocked.value) {
+    sendError.value = 'Please select Chat with Agent before sending a message.'
     return
   }
   const hasText = message.value.trim() !== ''
@@ -413,7 +433,10 @@ const startNewChat = async () => {
 
     chatClosed.value = false
     showPrechatForm.value = false
+    agentChatStarted.value = false
+    showBotMenu.value = true
     showUserForm.value = false
+    showCnicForm.value = false
     sendError.value = ''
     message.value = ''
     clearAttachments()
@@ -458,6 +481,7 @@ const submitPrechatInfo = async () => {
 
     sendError.value = ''
     showPrechatForm.value = false
+    showBotMenu.value = !agentChatStarted.value
     prechatForm.value = { name: '', phone: '' }
     await scrollToBottom()
   } catch (error) {
@@ -511,6 +535,7 @@ const submitUserInfo = async () => {
      
     sendError.value = ''
     showUserForm.value = false
+    showBotMenu.value = !agentChatStarted.value
     userForm.value = { phone: '', customerName: '', registrationNo: [''], email: '' }
     await scrollToBottom()
   } catch (error) {
@@ -551,6 +576,7 @@ const submitCnic = async () => {
 
     sendError.value = ''
     showCnicForm.value = false
+    showBotMenu.value = !agentChatStarted.value
     cnicForm.value = { cnic: '' }
     await scrollToBottom()
   } catch (error) {
@@ -571,12 +597,64 @@ const getUserInfo = (msg) => {
 
 const cancelUserInfo = () => {
   showUserForm.value = false
+  showBotMenu.value = !agentChatStarted.value
   userForm.value = { phone: '', customerName: '', registrationNo: [''], email: '' }
 }
 
 const cancelCnic = () => {
   showCnicForm.value = false
+  showBotMenu.value = !agentChatStarted.value
   cnicForm.value = { cnic: '' }
+}
+
+const chooseBotOption = (option) => {
+  if (option === 'ledger') {
+    showBotMenu.value = false
+    showUserForm.value = true
+    showCnicForm.value = false
+    return
+  }
+
+  if (option === 'cnic') {
+    showBotMenu.value = false
+    showUserForm.value = false
+    showCnicForm.value = true
+    return
+  }
+
+  if (option === 'agent') {
+    requestAgentChat()
+  }
+}
+
+const requestAgentChat = async () => {
+  if (!chatId || agentChatStarted.value) return
+
+  try {
+    const cfg = window.ChatConfig || {}
+    const apiBase = cfg.apiBase || ''
+    const headers = {}
+    if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
+
+    const sendUrl = apiBase ? apiBase + '/message' : '/send-message'
+
+    await axios.post(sendUrl, {
+      chat_id: chatId,
+      message: 'Chat with agent requested.',
+      sender_type: 'visitor',
+      message_type: 'chat_with_agent_request',
+    }, { headers })
+
+    sendError.value = ''
+    agentChatStarted.value = true
+    showBotMenu.value = false
+    showUserForm.value = false
+    showCnicForm.value = false
+    await scrollToBottom()
+  } catch (error) {
+    console.error('Failed to request agent chat:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to connect with an agent. Please try again.')
+  }
 }
 
 const addRegistration = () => {
@@ -652,6 +730,18 @@ const removeRegistration = (index) => {
                   CNIC Sent:
                 </strong>
                 <div><strong>CNIC:</strong> {{ getUserInfo(msg).cnic }}</div>
+              </div>
+            </div>
+
+            <div class="text-sm whitespace-pre-line" v-else-if="msg?.message_type === 'cnic_lookup_response'">
+              <div class="text-sm whitespace-pre-line">
+                <strong class="text-xs font-bold whitespace-pre-line mb-1.5 flex items-center gap-1.5" style="font-size: 15px;">
+                  Registration Numbers:
+                </strong>
+                <template v-if="getUserInfo(msg).registration_numbers?.length">
+                  <div v-for="reg in getUserInfo(msg).registration_numbers" :key="reg">{{ reg }}</div>
+                </template>
+                <div v-else>{{ getUserInfo(msg).message || 'No registration numbers found.' }}</div>
               </div>
             </div>
 
@@ -733,6 +823,22 @@ const removeRegistration = (index) => {
             </div>
           </div>
         </form>
+      </div>
+
+      <!-- Bot Menu -->
+      <div v-if="showBotMenu && !showUserForm && !showCnicForm" class="border-t p-3 bg-orange-50 info_form">
+        <h4 class="font-semibold text-orange-800 mb-3">Please select an option:</h4>
+        <div class="d-grid gap-2">
+          <button type="button" class="btn btn-light border text-start btn-sm" @click="chooseBotOption('ledger')">
+            Press 1 for Ledger
+          </button>
+          <button type="button" class="btn btn-light border text-start btn-sm" @click="chooseBotOption('cnic')">
+            Press 2 for CNIC
+          </button>
+          <button type="button" class="btn btn-light border text-start btn-sm" @click="chooseBotOption('agent')">
+            Press 3 for Chat with Agent
+          </button>
+        </div>
       </div>
 
       <!-- User Info Form -->
@@ -882,14 +988,14 @@ const removeRegistration = (index) => {
 
           <button type="button" @click="triggerFileInput" title="Attach file"
             class="w-20 rounded-5 border-1"
-            :disabled="showPrechatForm || chatClosed"
-            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || chatClosed }">
+            :disabled="isComposerLocked"
+            :class="{ 'opacity-50 cursor-not-allowed': isComposerLocked }">
             <i class="fa fa-paperclip"></i>
           </button>
 
           <input v-model="message" type="text" placeholder="Type a message..."
             class="form-control rounded-5"
-            :disabled="showPrechatForm || chatClosed" />
+            :disabled="isComposerLocked" />
 
            <!-- <textarea v-model="message"
               @input="autoResize"
@@ -903,8 +1009,8 @@ const removeRegistration = (index) => {
 
           <button type="submit"
             class="btn btn-primary btn-sm rounded-5 px-3"
-            :disabled="showPrechatForm || chatClosed || (!message.trim() && !attachedFiles.length)"
-            :class="{ 'opacity-50 cursor-not-allowed': showPrechatForm || chatClosed || (!message.trim() && !attachedFiles.length) }">
+            :disabled="isComposerLocked || (!message.trim() && !attachedFiles.length)"
+            :class="{ 'opacity-50 cursor-not-allowed': isComposerLocked || (!message.trim() && !attachedFiles.length) }">
             Send
           </button>
         </form>

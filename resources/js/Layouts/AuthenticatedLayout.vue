@@ -45,19 +45,19 @@ const showingNavigationDropdown = ref(false);
                                 >
                                     Chat System
                                 </NavLink>
-                                <NavLink v-if="$page.props.auth.user.roles === 'Super Admin' || $page.props.auth.user.roles === 'Admin'"
+                                <NavLink v-if="$page.props.auth.user.roles === 'Super Admin' || $page.props.auth.user.roles === 'Admin' || $page.props.auth.user.roles === 'QA User'"
                                     :href="route('agent.chats.history')"
                                     :active="route().current('agent.chats.history') || route().current('agent.chats.history.show')"
                                 >
                                     Chat History
                                 </NavLink>
-                                 <NavLink v-if="$page.props.auth.user.roles === 'Super Admin' || $page.props.auth.user.roles === 'Admin'"
+                                 <NavLink v-if="$page.props.auth.user.roles === 'Super Admin' || $page.props.auth.user.roles === 'Admin' || $page.props.auth.user.roles === 'QA User'"
                                      :href="route('agent.reports')"
                                      :active="route().current('agent.reports')"
                                  >
                                      Reports
                                  </NavLink>
-                                  <NavLink v-if="$page.props.auth.user.roles === 'Super Admin' || $page.props.auth.user.roles === 'Admin'"
+                                  <NavLink v-if="$page.props.auth.user.roles === 'Super Admin' || $page.props.auth.user.roles === 'Admin' || $page.props.auth.user.roles === 'QA User'"
                                       :href="route('agent.sla-report')"
                                       :active="route().current('agent.sla-report')"
                                   >

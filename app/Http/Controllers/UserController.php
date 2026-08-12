@@ -14,8 +14,8 @@ class UserController extends Controller
         $query = User::query()->with('companies');
 
         if ($request->search) {
-            $query->where('name', 'like', '%'.$request->search.'%')
-                ->orWhere('email', 'like', '%'.$request->search.'%');
+            $query->where('name', 'like', '%' . $request->search . '%')
+                ->orWhere('email', 'like', '%' . $request->search . '%');
         }
 
         $users = $query->latest()->paginate(25);
@@ -40,6 +40,7 @@ class UserController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'role' => 'required|string',
             'message_per_page' => 'required|integer|min:1|max:100',
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8',
@@ -49,6 +50,7 @@ class UserController extends Controller
 
         $user = User::create([
             'name' => $validated['name'],
+            'roles' => $validated['role'],
             'email' => $validated['email'],
             'password' => $validated['password'],
             'message_per_page' => $validated['message_per_page'],
@@ -77,8 +79,9 @@ class UserController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'role' => 'required|string',
             'message_per_page' => 'required|integer|min:1|max:100',
-            'email' => 'required|string|email|max:255|unique:users,email,'.$user->id,
+            'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
             'password' => 'nullable|string|min:8',
             'company_ids' => 'array',
             'company_ids.*' => 'exists:companies,id',
@@ -86,6 +89,7 @@ class UserController extends Controller
 
         $user->update([
             'name' => $validated['name'],
+            'roles' => $validated['role'],
             'email' => $validated['email'],
             'password' => $validated['password'] ?? $user->password,
             'message_per_page' => $validated['message_per_page'] ?? $user->message_per_page,
