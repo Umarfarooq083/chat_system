@@ -193,6 +193,91 @@ class WidgetNewChatTest extends TestCase
         $this->assertSame(['REG-1001', 'REG-1002'], $payload['registration_numbers']);
     }
 
+    public function test_widget_can_fetch_ledger_by_clicking_cnic_registration_number(): void
+    {
+        $this->withoutMiddleware(ThrottleRequests::class);
+        Storage::fake('public');
+        Http::fakeSequence()
+            ->push([
+                'data' => [
+                    'files' => [
+                        ['reg_no' => 'REG-CLICK-1'],
+                    ],
+                ],
+            ], 200)
+            ->push([
+                'meta' => [
+                    'data' => rawurlencode('<html><body>Clicked Ledger</body></html>'),
+                ],
+            ], 200);
+
+        $visitorId = 'visitor_cnic_click';
+        $companyId = '123e4567-e89b-12d3-a456-426614174000';
+        $chatId = $this->createPrechatReadyWidgetChat($visitorId, $companyId);
+
+        $this->post('/api/widget/message', [
+            'visitor_id' => $visitorId,
+            'chat_id' => $chatId,
+            'company_id' => $companyId,
+            'message_type' => 'cnic_response',
+            'cnic' => '11111-1111111-1',
+            'message' => 'CNIC: 11111-1111111-1',
+        ])->assertOk();
+
+        $response = $this->postJson('/api/widget/ledger', [
+            'visitor_id' => $visitorId,
+            'chat_id' => $chatId,
+            'company_id' => $companyId,
+            'registration_no' => 'REG-CLICK-1',
+        ])->assertOk();
+
+        $this->assertSame('external_data_html', $response->json('message.message_type'));
+        $attachmentPath = Message::query()->where('message_type', 'external_data_html')->latest('id')->value('attachments');
+        $this->assertNotNull($attachmentPath);
+        Storage::disk('public')->assertExists($attachmentPath);
+        $this->assertStringContainsString('Clicked Ledger', Storage::disk('public')->get($attachmentPath));
+    }
+
+    public function test_local_visitor_ledger_accepts_matching_payload_visitor_id(): void
+    {
+        $this->withoutMiddleware(ThrottleRequests::class);
+        Storage::fake('public');
+        Http::fake([
+            '*' => Http::response([
+                'meta' => [
+                    'data' => rawurlencode('<html><body>Local Clicked Ledger</body></html>'),
+                ],
+            ], 200),
+        ]);
+
+        $visitorId = 'visitor_local_click';
+        $chat = Chat::create([
+            'visitor_id' => $visitorId,
+            'status' => 'open',
+            'last_message_at' => now(),
+            'agent_last_read_at' => now(),
+            'visitor_last_read_at' => now(),
+        ]);
+
+        Message::create([
+            'chat_id' => $chat->id,
+            'sender_type' => 'agent',
+            'message_type' => 'cnic_lookup_response',
+            'message' => json_encode([
+                'type' => 'cnic_lookup_response',
+                'registration_numbers' => ['REG-LOCAL-1'],
+            ]),
+        ]);
+
+        $response = $this->postJson('/visitor-chat/ledger', [
+            'visitor_id' => $visitorId,
+            'chat_id' => $chat->id,
+            'registration_no' => 'REG-LOCAL-1',
+        ])->assertOk();
+
+        $this->assertSame('external_data_html', $response->json('message.message_type'));
+    }
+
     private function createPrechatReadyWidgetChat(string $visitorId, string $companyId): int
     {
         $chatResponse = $this->postJson('/api/widget/chat', [

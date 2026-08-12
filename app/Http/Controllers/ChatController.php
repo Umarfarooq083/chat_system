@@ -51,8 +51,25 @@ class ChatController extends Controller
     private function canVisitorAccessChat(Chat $chat): bool
     {
         $visitorId = session('visitor_id');
+        if (! is_string($visitorId) && $visitorId !== null && method_exists($visitorId, 'toString')) {
+            $visitorId = $visitorId->toString();
+        }
 
         return is_string($visitorId) && $visitorId !== '' && $chat->visitor_id === $visitorId;
+    }
+
+    private function canRequestVisitorAccessChat(Request $request, Chat $chat): bool
+    {
+        if ($this->canVisitorAccessChat($chat)) {
+            return true;
+        }
+
+        $payloadVisitorId = $request->input('visitor_id');
+        $payloadVisitorId = is_string($payloadVisitorId) ? trim($payloadVisitorId) : null;
+
+        return $payloadVisitorId !== null
+            && $payloadVisitorId !== ''
+            && hash_equals((string) $chat->visitor_id, $payloadVisitorId);
     }
 
     private function hasAgentChatStarted(Chat $chat): bool
@@ -500,6 +517,88 @@ class ChatController extends Controller
         }
 
         return $disk->download($message->attachments, basename($message->attachments));
+    }
+
+    public function visitorLedger(Request $request, VisitorSelfServiceResponder $responder)
+    {
+        $validated = $request->validate([
+            'chat_id' => 'required|integer|exists:chats,id',
+            'visitor_id' => 'nullable|string|max:100',
+            'registration_no' => 'required|string|max:100',
+        ]);
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        if (! $this->canRequestVisitorAccessChat($request, $chat)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        return $this->sendVisitorLedgerResponse($chat, trim((string) $validated['registration_no']), $responder);
+    }
+
+    public function externalVisitorLedger(Request $request, VisitorSelfServiceResponder $responder)
+    {
+        $validated = $request->validate([
+            'visitor_id' => 'required|string|max:100',
+            'chat_id' => 'required|integer|exists:chats,id',
+            'registration_no' => 'required|string|max:100',
+        ]);
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        if ((string) $chat->visitor_id !== (string) $validated['visitor_id']) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        return $this->sendVisitorLedgerResponse($chat, trim((string) $validated['registration_no']), $responder);
+    }
+
+    private function sendVisitorLedgerResponse(Chat $chat, string $registrationNo, VisitorSelfServiceResponder $responder)
+    {
+        if (! $this->registrationNumberWasOffered($chat, $registrationNo)) {
+            return response()->json(['message' => 'Registration number is not available for this chat.'], 422);
+        }
+
+        $message = $responder->sendLedgerHtml($chat, $registrationNo);
+
+        return response()->json([
+            'message' => $message ? $this->serializeVisitorMessage($message) : null,
+        ]);
+    }
+
+    private function registrationNumberWasOffered(Chat $chat, string $registrationNo): bool
+    {
+        return $chat->messages()
+            ->where('message_type', 'cnic_lookup_response')
+            ->get()
+            ->contains(function (Message $message) use ($registrationNo) {
+                $payload = $message->message;
+                if (is_string($payload)) {
+                    $payload = json_decode($payload, true);
+                }
+                $numbers = is_array($payload) ? ($payload['registration_numbers'] ?? []) : [];
+                if (! is_array($numbers)) {
+                    return false;
+                }
+
+                return collect($numbers)
+                    ->map(fn ($value) => is_string($value) ? trim($value) : null)
+                    ->contains($registrationNo);
+            });
+    }
+
+    private function serializeVisitorMessage(Message $message): array
+    {
+        return [
+            'id' => $message->id,
+            'chat_id' => $message->chat_id,
+            'sender_type' => $message->sender_type,
+            'message_type' => $message->message_type,
+            'message' => $message->message,
+            'created_at' => optional($message->created_at)->toIso8601String(),
+            'attachment_view_url' => $message->attachment_view_url,
+            'attachment_download_url' => $message->attachment_download_url,
+            'attachment_name' => $message->attachment_name,
+            'attachment_is_image' => $message->attachment_is_image,
+        ];
     }
 
     public function getOrCreateChat(Request $request)

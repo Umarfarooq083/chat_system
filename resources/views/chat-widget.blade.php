@@ -35,6 +35,9 @@
         .bot-option { border: 1px solid #fed7aa; border-radius: 6px; padding: 9px 10px; background: #fff; color: #111827; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
         .bot-option:hover { border-color: var(--brand); }
         .bot-option:disabled { opacity: .6; cursor: not-allowed; }
+        .registration-link { border: 1px solid #bfdbfe; border-radius: 6px; padding: 6px 8px; margin: 4px 0; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; cursor: pointer; display: block; width: 100%; text-align: left; }
+        .registration-link:hover { border-color: var(--brand); color: var(--brand); }
+        .registration-link:disabled { opacity: .6; cursor: not-allowed; }
         .info-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #eff6ff; }
         .info-form.show { display: block; }
         .form-row { display: grid; gap: 8px; margin-bottom: 8px; }
@@ -362,10 +365,25 @@
             try {
                 const info = typeof latestMessage.message === 'string' ? JSON.parse(latestMessage.message) : latestMessage.message;
                 const regs = Array.isArray(info.registration_numbers) ? info.registration_numbers : [];
-                body.innerHTML = `
-                    <div style="font-weight: 600; margin-bottom: 4px;">Registration Numbers:</div>
-                    ${regs.length ? regs.map((reg) => `<div>${reg}</div>`).join('') : `<div>${info.message || 'No registration numbers found.'}</div>`}
-                `;
+                const title = document.createElement('div');
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '4px';
+                title.textContent = 'Registration Numbers:';
+                body.appendChild(title);
+                if (regs.length) {
+                    regs.forEach((reg) => {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'registration-link';
+                        button.textContent = reg;
+                        button.addEventListener('click', () => fetchLedgerForRegistration(reg, button));
+                        body.appendChild(button);
+                    });
+                } else {
+                    const empty = document.createElement('div');
+                    empty.textContent = info.message || 'No registration numbers found.';
+                    body.appendChild(empty);
+                }
             } catch (e) {
                 body.textContent = formatMessageBody(latestMessage.message);
             }
@@ -1003,6 +1021,48 @@
         showBotMenu = !agentChatStarted;
         updateFormVisibility();
         if (cnicEl) cnicEl.value = '';
+    }
+
+    async function fetchLedgerForRegistration(registrationNo, button) {
+        const reg = (registrationNo || '').toString().trim();
+        if (!chatId || !reg) return;
+
+        const originalText = button ? button.textContent : '';
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Fetching ledger...';
+        }
+
+        try {
+            const response = await fetch(`${apiBase}/ledger`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    visitor_id: visitorId,
+                    chat_id: chatId,
+                    company_id: companyId,
+                    registration_no: reg,
+                }),
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                throw new Error(text || `Request failed (${response.status})`);
+            }
+
+            const data = await response.json();
+            if (data && data.message) {
+                renderMessage(data.message);
+                lastId = Math.max(lastId, Number(data.message.id || 0));
+                scrollToBottom();
+            }
+        } catch (error) {
+            alert('Failed to fetch ledger file. Please try again.');
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
     }
 
     function chooseBotOption(option) {
