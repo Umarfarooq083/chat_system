@@ -870,7 +870,7 @@ const removeRegistration = (index) => {
       </div>
 
       <!-- Bot Menu -->
-      <div v-if="showBotMenu && !showUserForm && !showCnicForm" class="border-t p-3 bg-orange-50 info_form">
+      <!-- <div v-if="showBotMenu && !showUserForm && !showCnicForm" class="border-t p-3 bg-orange-50 info_form">
         <h4 class="font-semibold text-orange-800 mb-3">Please select an option:</h4>
         <div class="d-grid gap-2">
           <button type="button" class="btn btn-light border text-start btn-sm" @click="chooseBotOption('ledger')">
@@ -883,13 +883,11 @@ const removeRegistration = (index) => {
             Press 3 for Chat with Agent
           </button>
         </div>
-      </div>
+      </div> -->
 
 
 
-
-
-      <!-- <div v-if="showBotMenu && !showUserForm && !showCnicForm" 
+      <div v-if="showBotMenu && !showUserForm && !showCnicForm" 
         class="border-t border-orange-200 p-2 bg-orange-50/80 info_form">
           <div class="flex items-center gap-1.5 mb-2">
             <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -906,7 +904,7 @@ const removeRegistration = (index) => {
                         transition-all duration-150 text-xs"
                 @click="chooseBotOption('ledger')">
               <span class="flex items-center justify-center w-4 h-4 bg-orange-100 rounded-full text-[10px] font-bold text-orange-700">1</span>
-              <span class="text-gray-700 font-medium">For Ledger</span>
+              <span class="text-gray-700 font-medium"> Ledger</span>
           </button>
 
           <button type="button" 
@@ -915,7 +913,7 @@ const removeRegistration = (index) => {
                         transition-all duration-150 text-xs"
                 @click="chooseBotOption('cnic')">
             <span class="flex items-center justify-center w-4 h-4 bg-orange-100 rounded-full text-[10px] font-bold text-orange-700">2</span>
-            <span class="text-gray-700 font-medium">For CNIC</span>
+            <span class="text-gray-700 font-medium"> CNIC</span>
           </button>
 
           <button type="button" 
@@ -927,7 +925,7 @@ const removeRegistration = (index) => {
             <span class="text-gray-700 font-medium">Chat With Agent</span>
           </button>
         </div>
-      </div> -->
+      </div>
 
       
       <!-- User Info Form -->
