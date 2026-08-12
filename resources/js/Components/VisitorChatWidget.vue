@@ -18,6 +18,7 @@ const showUserForm = ref(false)
 const showCnicForm = ref(false)
 const sendError = ref('')
 const chatClosed = ref(false)
+const ledgerFetchLoading = ref({})
 const chatReadState = ref({
   agent_last_read_at: null,
   visitor_last_read_at: null,
@@ -607,6 +608,40 @@ const cancelCnic = () => {
   cnicForm.value = { cnic: '' }
 }
 
+const fetchLedgerForRegistration = async (registrationNo) => {
+  const reg = (registrationNo || '').toString().trim()
+  if (!chatId || !reg) return
+
+  ledgerFetchLoading.value = { ...ledgerFetchLoading.value, [reg]: true }
+  try {
+    const cfg = window.ChatConfig || {}
+    const apiBase = cfg.apiBase || ''
+    const headers = {}
+    if (cfg.apiToken) headers['X-CHAT-TOKEN'] = cfg.apiToken
+    if (page.props.csrf_token) headers['X-CSRF-TOKEN'] = page.props.csrf_token
+
+    const url = apiBase ? apiBase + '/chat/ledger' : '/visitor-chat/ledger'
+    const payload = {
+      chat_id: chatId,
+      registration_no: reg,
+    }
+    if (visitorId) payload.visitor_id = visitorId
+
+    const response = await axios.post(url, payload, { headers })
+    const botMessage = response?.data?.message || null
+    if (botMessage && !messages.value.some(item => item.id === botMessage.id)) {
+      messages.value.push(botMessage)
+    }
+    sendError.value = ''
+    await scrollToBottom()
+  } catch (error) {
+    console.error('Failed to fetch ledger file:', error)
+    sendError.value = extractErrorMessage(error, 'Failed to fetch ledger file. Please try again.')
+  } finally {
+    ledgerFetchLoading.value = { ...ledgerFetchLoading.value, [reg]: false }
+  }
+}
+
 const chooseBotOption = (option) => {
   if (option === 'ledger') {
     showBotMenu.value = false
@@ -739,7 +774,16 @@ const removeRegistration = (index) => {
                   Registration Numbers:
                 </strong>
                 <template v-if="getUserInfo(msg).registration_numbers?.length">
-                  <div v-for="reg in getUserInfo(msg).registration_numbers" :key="reg">{{ reg }}</div>
+                  <button
+                    v-for="reg in getUserInfo(msg).registration_numbers"
+                    :key="reg"
+                    type="button"
+                    class="d-block w-100 text-start btn btn-light border btn-sm mb-1"
+                    :disabled="ledgerFetchLoading[reg]"
+                    @click="fetchLedgerForRegistration(reg)"
+                  >
+                    {{ ledgerFetchLoading[reg] ? 'Fetching ledger...' : reg }}
+                  </button>
                 </template>
                 <div v-else>{{ getUserInfo(msg).message || 'No registration numbers found.' }}</div>
               </div>
@@ -826,7 +870,7 @@ const removeRegistration = (index) => {
       </div>
 
       <!-- Bot Menu -->
-      <div v-if="showBotMenu && !showUserForm && !showCnicForm" class="border-t p-3 bg-orange-50 info_form">
+      <!-- <div v-if="showBotMenu && !showUserForm && !showCnicForm" class="border-t p-3 bg-orange-50 info_form">
         <h4 class="font-semibold text-orange-800 mb-3">Please select an option:</h4>
         <div class="d-grid gap-2">
           <button type="button" class="btn btn-light border text-start btn-sm" @click="chooseBotOption('ledger')">
@@ -839,8 +883,51 @@ const removeRegistration = (index) => {
             Press 3 for Chat with Agent
           </button>
         </div>
+      </div> -->
+
+
+
+      <div v-if="showBotMenu && !showUserForm && !showCnicForm" 
+        class="border-t border-orange-200 p-2 bg-orange-50/80 info_form">
+          <div class="flex items-center gap-1.5 mb-2">
+            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h4 class="text-xs font-semibold text-orange-700">Choose option:</h4>
+          </div>
+
+          <div class="flex flex-wrap gap-1.5">
+          <button type="button" 
+                class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-orange-200 rounded 
+                        hover:border-orange-400 hover:bg-orange-50 hover:shadow-sm 
+                        transition-all duration-150 text-xs"
+                @click="chooseBotOption('ledger')">
+              <span class="flex items-center justify-center w-4 h-4 bg-orange-100 rounded-full text-[10px] font-bold text-orange-700">1</span>
+              <span class="text-gray-700 font-medium"> Ledger</span>
+          </button>
+
+          <button type="button" 
+                class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-orange-200 rounded 
+                        hover:border-orange-400 hover:bg-orange-50 hover:shadow-sm 
+                        transition-all duration-150 text-xs"
+                @click="chooseBotOption('cnic')">
+            <span class="flex items-center justify-center w-4 h-4 bg-orange-100 rounded-full text-[10px] font-bold text-orange-700">2</span>
+            <span class="text-gray-700 font-medium"> CNIC</span>
+          </button>
+
+          <button type="button" 
+                class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-orange-200 rounded 
+                        hover:border-orange-400 hover:bg-orange-50 hover:shadow-sm 
+                        transition-all duration-150 text-xs"
+                @click="chooseBotOption('agent')">
+            <span class="flex items-center justify-center w-4 h-4 bg-orange-100 rounded-full text-[10px] font-bold text-orange-700">3</span>
+            <span class="text-gray-700 font-medium">Chat With Agent</span>
+          </button>
+        </div>
       </div>
 
+      
       <!-- User Info Form -->
       <div v-if="showUserForm" class="border-t p-3 bg-blue-50 info_form">
         <h4 class="font-semibold text-blue-800 mb-3">Please provide your information:</h4>

@@ -40,6 +40,7 @@ Route::get('/chat', [ChatController::class, 'visitorChat']);
 Route::get('/chat-history', [ChatController::class, 'chatHistory']);
 
 Route::post('/send-message', [ChatController::class, 'sendMessage']);
+Route::post('/visitor-chat/ledger', [ChatController::class, 'visitorLedger']);
 Route::post('/chat/ping', [ChatController::class, 'ping']);
 Route::post('/chat/read', [ChatController::class, 'markVisitorRead']);
 Route::get('/attachments/{message}/view', [ChatController::class, 'viewAttachment'])->name('attachments.view');

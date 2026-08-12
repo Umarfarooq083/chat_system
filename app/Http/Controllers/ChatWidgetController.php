@@ -607,6 +607,62 @@ class ChatWidgetController extends Controller
         ]);
     }
 
+    public function fetchLedger(Request $request, VisitorSelfServiceResponder $responder)
+    {
+        $validated = $request->validate([
+            'visitor_id' => 'required|string|max:100',
+            'chat_id' => 'required|integer|exists:chats,id',
+            'company_id' => 'nullable|string|max:36',
+            'registration_no' => 'required|string|max:100',
+        ]);
+
+        if (preg_match(self::VISITOR_ID_PATTERN, (string) $validated['visitor_id']) !== 1) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $chat = Chat::findOrFail($validated['chat_id']);
+        if ((string) $chat->visitor_id !== (string) $validated['visitor_id']) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $companyId = trim($validated['company_id'] ?? '');
+        if ($companyId !== '' && (string) $chat->company_id !== $companyId) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $registrationNo = trim((string) $validated['registration_no']);
+        if (! $this->registrationNumberWasOffered($chat, $registrationNo)) {
+            return response()->json(['message' => 'Registration number is not available for this chat.'], 422);
+        }
+
+        $message = $responder->sendLedgerHtml($chat, $registrationNo);
+
+        return response()->json([
+            'message' => $message ? $this->serializeMessage($message) : null,
+        ]);
+    }
+
+    private function registrationNumberWasOffered(Chat $chat, string $registrationNo): bool
+    {
+        return $chat->messages()
+            ->where('message_type', 'cnic_lookup_response')
+            ->get()
+            ->contains(function (Message $message) use ($registrationNo) {
+                $payload = $message->message;
+                if (is_string($payload)) {
+                    $payload = json_decode($payload, true);
+                }
+                $numbers = is_array($payload) ? ($payload['registration_numbers'] ?? []) : [];
+                if (! is_array($numbers)) {
+                    return false;
+                }
+
+                return collect($numbers)
+                    ->map(fn ($value) => is_string($value) ? trim($value) : null)
+                    ->contains($registrationNo);
+            });
+    }
+
     private function serializeMessage(Message $message): array
     {
         return [
