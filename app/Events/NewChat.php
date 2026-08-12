@@ -67,6 +67,7 @@ class NewChat implements ShouldBroadcastNow
                 'registration_no' => $this->chat->registration_no,
                 'email' => $this->chat->email,
                 'prechat_submitted_at' => $this->chat->prechat_submitted_at?->toIso8601String(),
+                'agent_chat_requested_at' => $this->chat->agent_chat_requested_at?->toIso8601String(),
                 'user_info_submitted_at' => $this->chat->user_info_submitted_at?->toIso8601String(),
                 'first_visitor_message_at' => $this->chat->first_visitor_message_at?->toIso8601String(),
                 'first_agent_reply_at' => $this->chat->first_agent_reply_at?->toIso8601String(),

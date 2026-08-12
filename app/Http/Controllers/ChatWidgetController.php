@@ -7,6 +7,7 @@ use App\Events\MessageSent;
 use App\Events\NewChat;
 use App\Models\Chat;
 use App\Models\Message;
+use App\Services\VisitorSelfServiceResponder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -47,6 +48,30 @@ class ChatWidgetController extends Controller
         $chat->save();
 
         broadcast(new MessageSent($welcomeMessage));
+    }
+
+    private function hasAgentChatStarted(Chat $chat): bool
+    {
+        return $chat->agent_chat_requested_at !== null
+            || $chat->assigned_agent_id !== null
+            || $chat->first_agent_reply_at !== null;
+    }
+
+    private function serializeChat(Chat $chat, bool $prechatRequired): array
+    {
+        $agentChatStarted = $this->hasAgentChatStarted($chat);
+
+        return [
+            'id' => $chat->id,
+            'visitor_id' => $chat->visitor_id,
+            'status' => $chat->status,
+            'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
+            'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
+            'prechat_submitted_at' => optional($chat->prechat_submitted_at)->toIso8601String(),
+            'agent_chat_requested_at' => optional($chat->agent_chat_requested_at)->toIso8601String(),
+            'prechat_required' => $prechatRequired,
+            'bot_menu_required' => ! $prechatRequired && ! $agentChatStarted,
+        ];
     }
 
     public function page(Request $request)
@@ -136,15 +161,7 @@ class ChatWidgetController extends Controller
         }
 
         return response()->json([
-            'chat' => [
-                'id' => $chat->id,
-                'visitor_id' => $chat->visitor_id,
-                'status' => $chat->status,
-                'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
-                'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
-                'prechat_submitted_at' => optional($chat->prechat_submitted_at)->toIso8601String(),
-                'prechat_required' => $prechatRequired,
-            ],
+            'chat' => $this->serializeChat($chat, $prechatRequired),
             'messages' => $messages->map(fn (Message $m) => $this->serializeMessage($m))->values(),
         ]);
     }
@@ -213,15 +230,7 @@ class ChatWidgetController extends Controller
         }
 
         return response()->json([
-            'chat' => [
-                'id' => $chat->id,
-                'visitor_id' => $chat->visitor_id,
-                'status' => $chat->status,
-                'agent_last_read_at' => optional($chat->agent_last_read_at)->toIso8601String(),
-                'visitor_last_read_at' => optional($chat->visitor_last_read_at)->toIso8601String(),
-                'prechat_submitted_at' => optional($chat->prechat_submitted_at)->toIso8601String(),
-                'prechat_required' => $prechatRequired,
-            ],
+            'chat' => $this->serializeChat($chat, $prechatRequired),
             'messages' => $messages->map(fn (Message $m) => $this->serializeMessage($m))->values(),
         ]);
     }
@@ -276,6 +285,18 @@ class ChatWidgetController extends Controller
         if ($chat->prechat_submitted_at === null && $messageType !== 'prechat_info_response') {
             return response()->json([
                 'message' => 'Please provide your name and phone number to start chatting.',
+            ], 409);
+        }
+
+        $menuMessageTypes = [
+            'prechat_info_response',
+            'user_info_response',
+            'cnic_response',
+            'chat_with_agent_request',
+        ];
+        if (! $this->hasAgentChatStarted($chat) && ! in_array($messageType, $menuMessageTypes, true)) {
+            return response()->json([
+                'message' => 'Please select an option before chatting with an agent.',
             ], 409);
         }
 
@@ -347,6 +368,10 @@ class ChatWidgetController extends Controller
             }
         }
 
+        if ($messageType === 'chat_with_agent_request' && $chat->agent_chat_requested_at === null) {
+            $chat->agent_chat_requested_at = now();
+        }
+
         $messageText = trim($validated['message'] ?? '');
         if ($messageText === '' && ! $request->hasFile('attachments')) {
             return response()->json(['message' => 'Message or attachment is required'], 422);
@@ -411,9 +436,6 @@ class ChatWidgetController extends Controller
                     $chat->last_message_at = $last->created_at;
                     $chat->last_activity = now();
                     $chat->visitor_last_read_at = now();
-                    if ($chat->first_visitor_message_at === null) {
-                        $chat->first_visitor_message_at = $last->created_at;
-                    }
                     if (! $chat->ip) {
                         $chat->ip = $request->ip();
                     }
@@ -428,10 +450,18 @@ class ChatWidgetController extends Controller
                     foreach ($createdMessages as $created) {
                         broadcast(new MessageSent($created));
                     }
-                    broadcast(new NewChat($chat));
+                    $botMessages = [];
+                    $responder = app(VisitorSelfServiceResponder::class);
+                    foreach ($registrationNumbers as $registrationNo) {
+                        $botMessage = $responder->sendLedgerHtml($chat, $registrationNo);
+                        if ($botMessage) {
+                            $botMessages[] = $this->serializeMessage($botMessage);
+                        }
+                    }
 
                     return response()->json([
                         'message' => $this->serializeMessage($last),
+                        'bot_messages' => $botMessages,
                     ]);
                 }
             }
@@ -454,6 +484,8 @@ class ChatWidgetController extends Controller
                 'type' => 'cnic_response',
                 'cnic' => trim((string) $request->input('cnic')),
             ];
+        } elseif ($messageType === 'chat_with_agent_request') {
+            $chat_message = 'Chat with agent requested.';
         } else {
             $chat_message = $messageText;
         }
@@ -469,7 +501,10 @@ class ChatWidgetController extends Controller
         $chat->last_message_at = $message->created_at;
         $chat->last_activity = now();
         $chat->visitor_last_read_at = now();
-        if ($chat->first_visitor_message_at === null) {
+        if (
+            $chat->first_visitor_message_at === null
+            && ! in_array($messageType, ['prechat_info_response', 'user_info_response', 'cnic_response'], true)
+        ) {
             $chat->first_visitor_message_at = $message->created_at;
         }
         if (! $chat->ip) {
@@ -484,12 +519,34 @@ class ChatWidgetController extends Controller
         $chat->save();
 
         broadcast(new MessageSent($message));
-        if ($message->sender_type === 'visitor') {
+        $botMessages = [];
+        $responder = app(VisitorSelfServiceResponder::class);
+        if ($messageType === 'user_info_response') {
+            $registrationNo = $request->input('registration_no');
+            if (is_array($registrationNo)) {
+                $registrationNo = $registrationNo[0] ?? null;
+            }
+            $registrationNo = is_string($registrationNo) ? trim($registrationNo) : null;
+            if ($registrationNo) {
+                $botMessage = $responder->sendLedgerHtml($chat, $registrationNo);
+                if ($botMessage) {
+                    $botMessages[] = $this->serializeMessage($botMessage);
+                }
+            }
+        } elseif ($messageType === 'cnic_response') {
+            $botMessage = $responder->sendCnicLookupResult($chat, trim((string) $request->input('cnic')));
+            if ($botMessage) {
+                $botMessages[] = $this->serializeMessage($botMessage);
+            }
+        }
+
+        if ($message->sender_type === 'visitor' && $this->hasAgentChatStarted($chat)) {
             broadcast(new NewChat($chat));
         }
 
         return response()->json([
             'message' => $this->serializeMessage($message),
+            'bot_messages' => $botMessages,
         ]);
     }
 

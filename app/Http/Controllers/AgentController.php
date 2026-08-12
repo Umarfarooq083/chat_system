@@ -137,6 +137,7 @@ class AgentController extends Controller
                 $query->where('assigned_agent_id', auth()->id())
                     ->orWhere(function ($q) {
                         $q->whereNull('assigned_agent_id')
+                            ->whereNotNull('agent_chat_requested_at')
                             ->whereHas('messages', function ($msg) {
                                 $msg->where('sender_type', 'visitor');
                             });
@@ -426,7 +427,10 @@ class AgentController extends Controller
             ->where(function ($query) {
                 $query
                     ->where('assigned_agent_id', auth()->id())
-                    ->orWhereNull('assigned_agent_id');
+                    ->orWhere(function ($q) {
+                        $q->whereNull('assigned_agent_id')
+                            ->whereNotNull('agent_chat_requested_at');
+                    });
             })
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
@@ -990,12 +994,13 @@ class AgentController extends Controller
                 $q->where('sender_type', 'visitor');
             })->count(),
 
-            'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status', 'open')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
+            'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status', 'open')->whereNotNull('agent_chat_requested_at')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
             
             // 'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
             'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)
                 ->whereBetween('created_at', [$from, $to])
                 ->whereNull('assigned_agent_id')
+                ->whereNotNull('agent_chat_requested_at')
                 ->whereHas('messages', function ($q) {
                     $q->where('sender_type', 'visitor');
                 })

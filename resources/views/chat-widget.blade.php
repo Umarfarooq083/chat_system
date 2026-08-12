@@ -29,6 +29,12 @@
         .hint { padding: 10px 12px; color: #6b7280; font-size: 12px; }
         .prechat-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #ecfeff; }
         .prechat-form.show { display: block; }
+        .bot-menu { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #fff7ed; }
+        .bot-menu.show { display: block; }
+        .bot-menu-options { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
+        .bot-option { border: 1px solid #fed7aa; border-radius: 6px; padding: 9px 10px; background: #fff; color: #111827; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+        .bot-option:hover { border-color: var(--brand); }
+        .bot-option:disabled { opacity: .6; cursor: not-allowed; }
         .info-form { display: none; border-top: 1px solid #e5e7eb; padding: 12px; background: #eff6ff; }
         .info-form.show { display: block; }
         .form-row { display: grid; gap: 8px; margin-bottom: 8px; }
@@ -88,6 +94,14 @@
         </div>
         <div class="form-row" style="justify-content: flex-end; gap: 8px;">
             <button class="form-btn primary" id="prechatSubmit" type="button">Start Chat</button>
+        </div>
+    </div>
+    <div class="bot-menu" id="botMenu">
+        <div class="hint" style="color: #9a3412; font-weight: 600;">Please select an option:</div>
+        <div class="bot-menu-options">
+            <button class="bot-option" data-bot-option="ledger" type="button">Press 1 for Ledger</button>
+            <button class="bot-option" data-bot-option="cnic" type="button">Press 2 for CNIC</button>
+            <button class="bot-option" data-bot-option="agent" type="button">Press 3 for Chat with Agent</button>
         </div>
     </div>
     <div class="info-form" id="infoForm">
@@ -152,6 +166,8 @@
     const prechatNameEl = document.getElementById('prechatName');
     const prechatPhoneEl = document.getElementById('prechatPhone');
     const prechatSubmitBtn = document.getElementById('prechatSubmit');
+    const botMenuEl = document.getElementById('botMenu');
+    const botOptionBtns = document.querySelectorAll('[data-bot-option]');
     const infoFormEl = document.getElementById('infoForm');
     const cnicFormEl = document.getElementById('cnicForm');
     const phoneEl = document.getElementById('phone');
@@ -186,6 +202,8 @@
     let channelSubscription = null;
     let renderedMessageIds = new Set();
     let showPrechatForm = false;
+    let showBotMenu = false;
+    let agentChatStarted = false;
     let showUserForm = false;
     let showCnicForm = false;
     let attachedFile = null;
@@ -340,6 +358,17 @@
             } catch (e) {
                 body.textContent = formatMessageBody(latestMessage.message);
             }
+        } else if (latestMessage.message_type === 'cnic_lookup_response') {
+            try {
+                const info = typeof latestMessage.message === 'string' ? JSON.parse(latestMessage.message) : latestMessage.message;
+                const regs = Array.isArray(info.registration_numbers) ? info.registration_numbers : [];
+                body.innerHTML = `
+                    <div style="font-weight: 600; margin-bottom: 4px;">Registration Numbers:</div>
+                    ${regs.length ? regs.map((reg) => `<div>${reg}</div>`).join('') : `<div>${info.message || 'No registration numbers found.'}</div>`}
+                `;
+            } catch (e) {
+                body.textContent = formatMessageBody(latestMessage.message);
+            }
         } else {
             body.textContent = formatMessageBody(latestMessage.message);
         }
@@ -390,6 +419,7 @@
     function updateFormVisibility() {
         if (chatClosed) {
             showPrechatForm = false;
+            showBotMenu = false;
             showUserForm = false;
             showCnicForm = false;
         }
@@ -397,6 +427,12 @@
             prechatFormEl.classList.add('show');
         } else {
             prechatFormEl.classList.remove('show');
+        }
+        const menuVisible = showBotMenu && !showPrechatForm && !showUserForm && !showCnicForm;
+        if (menuVisible) {
+            botMenuEl.classList.add('show');
+        } else {
+            botMenuEl.classList.remove('show');
         }
         if (showUserForm) {
             infoFormEl.classList.add('show');
@@ -409,7 +445,7 @@
             cnicFormEl.classList.remove('show');
         }
 
-        const blockComposer = showPrechatForm === true || chatClosed === true;
+        const blockComposer = showPrechatForm === true || showBotMenu === true || showUserForm === true || showCnicForm === true || chatClosed === true;
         textEl.disabled = blockComposer;
         attachBtn.disabled = blockComposer;
         fileInput.disabled = blockComposer;
@@ -453,6 +489,8 @@
         lastId = 0;
 
         showPrechatForm = !!data.chat?.prechat_required;
+        agentChatStarted = !showPrechatForm && (!!data.chat?.agent_chat_requested_at || data.chat?.bot_menu_required === false);
+        showBotMenu = !!data.chat?.bot_menu_required;
         showUserForm = false;
         showCnicForm = false;
 
@@ -476,6 +514,11 @@
             }
             if (m.message_type === 'prechat_info_response' && m.sender_type === 'visitor') {
                 showPrechatForm = false;
+                if (!agentChatStarted) showBotMenu = true;
+            }
+            if (m.message_type === 'chat_with_agent_request' && m.sender_type === 'visitor') {
+                agentChatStarted = true;
+                showBotMenu = false;
             }
         });
 
@@ -594,6 +637,11 @@
             }
             if (message.message_type === 'prechat_info_response' && message.sender_type === 'visitor') {
                 showPrechatForm = false;
+                if (!agentChatStarted) showBotMenu = true;
+            }
+            if (message.message_type === 'chat_with_agent_request' && message.sender_type === 'visitor') {
+                agentChatStarted = true;
+                showBotMenu = false;
             }
             updateFormVisibility();
             scrollToBottom();
@@ -696,6 +744,10 @@
             alert('Please provide your name and phone number to start chatting.');
             return;
         }
+        if (!agentChatStarted || showBotMenu || showUserForm || showCnicForm) {
+            alert('Please select Chat with Agent before sending a message.');
+            return;
+        }
         const msg = textEl.value.trim();
         const hasText = msg !== '';
         
@@ -746,12 +798,16 @@
             if (data && data.message) {
                 renderMessage(data.message);
                 lastId = Math.max(lastId, Number(data.message.id || 0));
+                (data.bot_messages || []).forEach((botMessage) => {
+                    renderMessage(botMessage);
+                    lastId = Math.max(lastId, Number(botMessage.id || 0));
+                });
                 scrollToBottom();
             }
         } catch (e) {
             alert(String(e.message || 'Failed to send. Please try again.'));
         } finally {
-            sendBtn.disabled = false;
+            updateSendButton();
             textEl.focus();
         }
     }
@@ -789,6 +845,7 @@
             const data = await response.json();
 
             showPrechatForm = false;
+            showBotMenu = !agentChatStarted;
             updateFormVisibility();
             prechatNameEl.value = '';
             prechatPhoneEl.value = '';
@@ -796,6 +853,10 @@
             if (data && data.message) {
                 renderMessage(data.message);
                 lastId = Math.max(lastId, Number(data.message.id || 0));
+                (data.bot_messages || []).forEach((botMessage) => {
+                    renderMessage(botMessage);
+                    lastId = Math.max(lastId, Number(botMessage.id || 0));
+                });
                 scrollToBottom();
             }
         } catch (error) {
@@ -841,7 +902,17 @@
             const data = await response.json();
 
             showUserForm = false;
+            showBotMenu = !agentChatStarted;
             updateFormVisibility();
+            if (data && data.message) {
+                renderMessage(data.message);
+                lastId = Math.max(lastId, Number(data.message.id || 0));
+                (data.bot_messages || []).forEach((botMessage) => {
+                    renderMessage(botMessage);
+                    lastId = Math.max(lastId, Number(botMessage.id || 0));
+                });
+                scrollToBottom();
+            }
             // Clear form
             phoneEl.value = '';
             customerNameEl.value = '';
@@ -885,10 +956,21 @@
             if (!response.ok) {
                 throw new Error(`Request failed (${response.status}): ${response.statusText}`);
             }
+            const data = await response.json();
 
             showCnicForm = false;
+            showBotMenu = !agentChatStarted;
             updateFormVisibility();
             if (cnicEl) cnicEl.value = '';
+            if (data && data.message) {
+                renderMessage(data.message);
+                lastId = Math.max(lastId, Number(data.message.id || 0));
+                (data.bot_messages || []).forEach((botMessage) => {
+                    renderMessage(botMessage);
+                    lastId = Math.max(lastId, Number(botMessage.id || 0));
+                });
+                scrollToBottom();
+            }
         } catch (error) {
             alert('Failed to send CNIC. Please try again.');
         } finally {
@@ -908,6 +990,7 @@
 
     function cancelInfo() {
         showUserForm = false;
+        showBotMenu = !agentChatStarted;
         updateFormVisibility();
         phoneEl.value = '';
         customerNameEl.value = '';
@@ -917,8 +1000,74 @@
 
     function cancelCnic() {
         showCnicForm = false;
+        showBotMenu = !agentChatStarted;
         updateFormVisibility();
         if (cnicEl) cnicEl.value = '';
+    }
+
+    function chooseBotOption(option) {
+        if (option === 'ledger') {
+            showBotMenu = false;
+            showUserForm = true;
+            showCnicForm = false;
+            updateFormVisibility();
+            phoneEl.focus();
+            return;
+        }
+
+        if (option === 'cnic') {
+            showBotMenu = false;
+            showUserForm = false;
+            showCnicForm = true;
+            updateFormVisibility();
+            cnicEl.focus();
+            return;
+        }
+
+        if (option === 'agent') {
+            requestAgentChat();
+        }
+    }
+
+    async function requestAgentChat() {
+        if (!chatId || agentChatStarted) return;
+        botOptionBtns.forEach((btn) => { btn.disabled = true; });
+        try {
+            const formData = new FormData();
+            formData.append('visitor_id', visitorId);
+            formData.append('chat_id', chatId);
+            formData.append('company_id', companyId);
+            formData.append('message_type', 'chat_with_agent_request');
+            formData.append('message', 'Chat with agent requested.');
+            formData.append('current_url', document.referrer || null);
+            formData.append('referrer_url', document.referrer || null);
+
+            const response = await fetch(`${apiBase}/message`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                throw new Error(text || `Request failed (${response.status})`);
+            }
+
+            const data = await response.json();
+            agentChatStarted = true;
+            showBotMenu = false;
+            showUserForm = false;
+            showCnicForm = false;
+            updateFormVisibility();
+            if (data && data.message) {
+                renderMessage(data.message);
+                lastId = Math.max(lastId, Number(data.message.id || 0));
+                scrollToBottom();
+            }
+            textEl.focus();
+        } catch (error) {
+            alert('Failed to connect with an agent. Please try again.');
+        } finally {
+            botOptionBtns.forEach((btn) => { btn.disabled = false; });
+        }
     }
 
     function setupUrlTracking() {
@@ -971,7 +1120,7 @@
     }
 
     function updateSendButton() {
-        if (showPrechatForm || chatClosed) {
+        if (showPrechatForm || showBotMenu || showUserForm || showCnicForm || !agentChatStarted || chatClosed) {
             sendBtn.disabled = true;
             return;
         }
@@ -1028,7 +1177,7 @@
     }
 
     attachBtn.addEventListener('click', () => {
-        if (showPrechatForm) return;
+        if (showPrechatForm || showBotMenu || showUserForm || showCnicForm || !agentChatStarted) return;
         fileInput.click();
     });
 
@@ -1055,6 +1204,9 @@
     submitCnicBtn.addEventListener('click', submitCnic);
     cancelCnicBtn.addEventListener('click', cancelCnic);
     cnicEl.addEventListener('input', handleCnicInput);
+    botOptionBtns.forEach((btn) => {
+        btn.addEventListener('click', () => chooseBotOption(btn.dataset.botOption));
+    });
     if (addRegistrationNoBtn) addRegistrationNoBtn.addEventListener('click', addRegistrationInput);
 
     textEl.addEventListener('input', updateSendButton);
