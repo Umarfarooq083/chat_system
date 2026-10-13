@@ -1216,4 +1216,27 @@ class ChatController extends Controller
             'AgentName' => $chat,
         ]);
     }
+
+    public function agentCode(Request $request)
+    {
+        $token = $request->header('token');
+        if ($token !== 'bgc@123321') {
+            return response()->json([
+                'status' => false,
+                'message' => 'Invalid token',
+            ], 401);
+        }
+
+        $chats = DB::table('chats')
+            ->leftJoin('users', 'users.id', '=', 'chats.assigned_agent_id')
+            ->whereIn('chats.id', $request->chat_id)
+            ->select(
+                'chats.id as chat_id',
+                'users.code as agent_code'
+            )
+            ->get();
+
+        return $chats;
+
+    }
 }
