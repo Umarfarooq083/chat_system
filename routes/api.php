@@ -25,6 +25,9 @@ Route::post('/chat/ledger', [ChatController::class, 'externalVisitorLedger'])
     ->middleware(CheckChatToken::class);
 
 
+Route::post('/agent-code', [ChatController::class, 'agentCode']);
+
+
 Route::prefix('widget')->middleware('throttle:widget')->group(function () {
     Route::post('/chat', [ChatWidgetController::class, 'createChat']);
     Route::post('/chat/new', [ChatWidgetController::class, 'newChat']);
