@@ -580,7 +580,7 @@ class ChatController extends Controller
                 }
 
                 return collect($numbers)
-                    ->map(fn ($value) => is_string($value) ? trim($value) : null)
+                    ->map(fn($value) => is_string($value) ? trim($value) : null)
                     ->contains($registrationNo);
             });
     }
