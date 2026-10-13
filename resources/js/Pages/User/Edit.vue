@@ -17,6 +17,7 @@ const props = defineProps({
 const form = ref({
     name: props.user.name,
     email: props.user.email,
+    code: props.user.code || '',
     role: props.user.roles,
     password: '',
     message_per_page: props.user.message_per_page,
@@ -79,6 +80,18 @@ function submit() {
                                     :class="errors.email ? 'border-red-300' : ''"
                                 />
                                 <p v-if="errors.email" class="mt-1 text-sm text-red-600">{{ errors.email }}</p>
+                            </div>
+
+                            <div>
+                                <label for="code" class="block text-sm font-medium text-gray-700">Code</label>
+                                <input
+                                    type="text"
+                                    id="code"
+                                    v-model="form.code"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                    :class="errors.code ? 'border-red-300' : ''"
+                                />
+                                <p v-if="errors.code" class="mt-1 text-sm text-red-600">{{ errors.code }}</p>
                             </div>
 
                             <div>

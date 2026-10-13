@@ -147,7 +147,7 @@ class AgentController extends Controller
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->get();
-            // ->paginate(100);
+        // ->paginate(100);
 
         $chats->each->append('is_online');
 
@@ -540,6 +540,12 @@ class AgentController extends Controller
 
     public function storeFeedback(Request $request, Chat $chat)
     {
+        $code = null;
+        if ($chat->assigned_agent_id) {
+            $user = User::where('id', $chat?->assigned_agent_id)->first();
+            $code = $user->code;
+        }
+
         $request->validate([
             'inquiries' => ['required', 'array', function ($attribute, $value, $fail) {
                 $hasAtLeastOne = false;
@@ -577,9 +583,10 @@ class AgentController extends Controller
             'chat_id' => Crypt::encryptString((string) $chat->id),
             'registration_no' => $request->registration_no,
             'inquiries' => $request->inquiries,
+            'code' => $code,
         ];
-        
-//   $chatId = (int) Crypt::decryptString($request->chat_id);
+
+        //   $chatId = (int) Crypt::decryptString($request->chat_id);
         $url = env('ENQUIRY_TYPE_POST_API_URL');
 
         Http::withHeaders([
@@ -995,7 +1002,7 @@ class AgentController extends Controller
             })->count(),
 
             'active_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->where('status', 'open')->whereNotNull('agent_chat_requested_at')->where('last_activity', '>=', Carbon::now()->subMinutes(15))->count(),
-            
+
             // 'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)->whereBetween('created_at', [$from, $to])->whereNull('assigned_agent_id')->count(),
             'unassigned_chats_count' => Chat::byCompanyUuid($selectedCompany)
                 ->whereBetween('created_at', [$from, $to])

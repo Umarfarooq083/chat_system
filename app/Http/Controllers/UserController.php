@@ -40,6 +40,7 @@ class UserController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'code' => 'nullable',
             'role' => 'required|string',
             'message_per_page' => 'required|integer|min:1|max:100',
             'email' => 'required|string|email|max:255|unique:users',
@@ -51,6 +52,7 @@ class UserController extends Controller
         $user = User::create([
             'name' => $validated['name'],
             'roles' => $validated['role'],
+            'code' => $validated['code'],
             'email' => $validated['email'],
             'password' => $validated['password'],
             'message_per_page' => $validated['message_per_page'],
@@ -79,6 +81,7 @@ class UserController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'code' => 'nullable',
             'role' => 'required|string',
             'message_per_page' => 'required|integer|min:1|max:100',
             'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
@@ -90,6 +93,7 @@ class UserController extends Controller
         $user->update([
             'name' => $validated['name'],
             'roles' => $validated['role'],
+            'code' => $validated['code'],
             'email' => $validated['email'],
             'password' => $validated['password'] ?? $user->password,
             'message_per_page' => $validated['message_per_page'] ?? $user->message_per_page,
